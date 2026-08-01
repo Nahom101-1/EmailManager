@@ -313,6 +313,75 @@ export function streamClaudeWithTools(
 }
 
 /**
+ * Auto-routing: Claude API → Ollama → AiUnavailableError.
+ * Used by the CLI so it doesn't need to know which backend is configured.
+ */
+export async function callAi(system: string, messages: ChatMessage[]): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (apiKey) {
+    return callClaude(system, messages)
+  }
+  const { ollamaAvailable, callOllama } = await import("@/lib/ai/local")
+  if (await ollamaAvailable()) {
+    return callOllama(system, messages)
+  }
+  throw new AiUnavailableError("No AI backend available. Set ANTHROPIC_API_KEY or start Ollama.")
+}
+
+export async function* streamAi(
+  system: string,
+  messages: ChatMessage[]
+): AsyncGenerator<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    const { ollamaAvailable, streamOllama } = await import("@/lib/ai/local")
+    if (await ollamaAvailable()) {
+      yield* streamOllama(system, messages)
+      return
+    }
+    throw new AiUnavailableError("No AI backend available.")
+  }
+  // Stream from Claude raw API
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
+      max_tokens: 1280,
+      system,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      stream: true,
+    }),
+  })
+  if (!res.ok) throw new Error(`Anthropic stream error ${res.status}`)
+  const reader = res.body!.getReader()
+  const dec = new TextDecoder()
+  let buf = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split("\n")
+    buf = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      try {
+        const evt = JSON.parse(line.slice(6)) as { type: string; delta?: { type: string; text?: string } }
+        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+          yield evt.delta.text
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+/**
  * Deterministic answer used when cloud AI is off or unavailable. Grounded in
  * the same real briefing the UI shows, so "Demo" mode still says true things.
  */

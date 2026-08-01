@@ -1,0 +1,217 @@
+"use client"
+
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { Btn, Icon } from "@/components/ui"
+
+export interface SyncTarget {
+  id: string
+  email: string
+}
+
+interface ToastItem {
+  id: number
+  msg: string
+  kind?: "ok" | "err"
+  sub?: string
+}
+
+interface SyncResult {
+  listed: number
+  stored: number
+  subscriptionsDetected: number
+  accountsDetected: number
+}
+
+interface SyncContextValue {
+  startSync: (targets: SyncTarget[], label?: string) => void
+  toast: (msg: string, kind?: "ok" | "err", sub?: string) => void
+}
+
+const SyncContext = createContext<SyncContextValue | null>(null)
+
+const STEPS = [
+  { k: "token", label: "Refreshing token" },
+  { k: "fetch", label: "Fetching messages" },
+  { k: "store", label: "Storing metadata" },
+  { k: "detect", label: "Detecting subscriptions" },
+]
+
+export function SyncProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter()
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [sync, setSync] = useState<{ targets: SyncTarget[]; label: string } | null>(null)
+  const tid = useRef(0)
+
+  const toast = useCallback((msg: string, kind?: "ok" | "err", sub?: string) => {
+    const id = ++tid.current
+    setToasts((l) => [...l, { id, msg, kind, sub }])
+    setTimeout(() => setToasts((l) => l.filter((x) => x.id !== id)), 3200)
+  }, [])
+
+  const startSync = useCallback((targets: SyncTarget[], label?: string) => {
+    if (targets.length === 0) {
+      toast("No inboxes to sync", "err")
+      return
+    }
+    setSync({ targets, label: label ?? (targets.length === 1 ? targets[0].email : `${targets.length} inboxes`) })
+  }, [toast])
+
+  const close = useCallback(() => {
+    setSync(null)
+    router.refresh()
+  }, [router])
+
+  return (
+    <SyncContext.Provider value={{ startSync, toast }}>
+      {children}
+      {sync && <SyncModal targets={sync.targets} label={sync.label} onClose={close} onToast={toast} />}
+      <div className="toasts">
+        {toasts.map((t) => (
+          <div key={t.id} className="toast">
+            <span className={"t-ic " + (t.kind === "err" ? "err" : "ok")}>
+              <Icon name={t.kind === "err" ? "alert" : "check"} size={13} />
+            </span>
+            <div className="t-body">
+              <div className="tt">{t.msg}</div>
+              {t.sub && <div className="ts">{t.sub}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </SyncContext.Provider>
+  )
+}
+
+function SyncModal({
+  targets,
+  label,
+  onClose,
+  onToast,
+}: {
+  targets: SyncTarget[]
+  label: string
+  onClose: () => void
+  onToast: (msg: string, kind?: "ok" | "err", sub?: string) => void
+}) {
+  const [step, setStep] = useState(0)
+  const [done, setDone] = useState(false)
+  const [errored, setErrored] = useState(false)
+  const [result, setResult] = useState<SyncResult>({ listed: 0, stored: 0, subscriptionsDetected: 0, accountsDetected: 0 })
+
+  useEffect(() => {
+    let alive = true
+    // Animate the steps on a timer for the signature feel while the real
+    // sync runs in parallel; settle on the real result when it returns.
+    const timers: ReturnType<typeof setTimeout>[] = []
+    ;[700, 1500, 2300].forEach((ms, i) => {
+      timers.push(setTimeout(() => alive && setStep(i + 1), ms))
+    })
+
+    ;(async () => {
+      const agg: SyncResult = { listed: 0, stored: 0, subscriptionsDetected: 0, accountsDetected: 0 }
+      let anyError = false
+      for (const target of targets) {
+        try {
+          const res = await fetch(`/api/providers/${target.id}/sync`, { method: "POST" })
+          const data = await res.json()
+          if (!res.ok) {
+            anyError = true
+            continue
+          }
+          agg.listed += data.listed ?? 0
+          agg.stored += data.stored ?? 0
+          agg.subscriptionsDetected += data.subscriptionsDetected ?? 0
+          agg.accountsDetected += data.accountsDetected ?? 0
+        } catch {
+          anyError = true
+        }
+      }
+      if (!alive) return
+      timers.forEach(clearTimeout)
+      setResult(agg)
+      setErrored(anyError)
+      setStep(STEPS.length)
+      setDone(true)
+      if (anyError) onToast("Some inboxes failed to sync", "err")
+      else onToast("Sync complete", "ok", `${agg.stored} messages · ${agg.subscriptionsDetected} subs · ${agg.accountsDetected} accounts`)
+    })()
+
+    return () => {
+      alive = false
+      timers.forEach(clearTimeout)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className="modal-scrim" onClick={done ? onClose : undefined}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="mono-tile sm" style={{ color: "var(--accent)" }}>
+            <Icon name={done ? (errored ? "alert" : "check") : "sync"} size={15} />
+          </span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 650, fontSize: 13.5 }}>{done ? (errored ? "Sync finished with errors" : "Sync complete") : "Syncing inbox"}</div>
+            <div className="row-sub mono">{label}</div>
+          </div>
+          {done && (
+            <button className="btn ghost icon sm" onClick={onClose}>
+              <Icon name="x" size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="modal-body">
+          {!done ? (
+            <div className="steps">
+              {STEPS.map((s, i) => (
+                <div key={s.k} className={"step " + (i < step ? "done" : i === step ? "active" : "")}>
+                  <span className="sdot">
+                    {i < step ? <Icon name="check" size={11} /> : i === step ? <span className="spin" /> : null}
+                  </span>
+                  {s.label}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                { l: "Messages scanned", v: result.listed },
+                { l: "Stored", v: result.stored },
+                { l: "Subscriptions", v: result.subscriptionsDetected },
+                { l: "Accounts", v: result.accountsDetected },
+              ].map((r) => (
+                <div key={r.l} className="card" style={{ padding: 13, background: "var(--surface-inset)" }}>
+                  <div className="stat" style={{ padding: 0, gap: 4 }}>
+                    <span className="label">{r.l}</span>
+                    <span className="val" style={{ fontSize: 22 }}>{r.v.toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {done && (
+          <div className="modal-foot">
+            <span className="faint mono center" style={{ fontSize: 11, marginRight: "auto" }}>
+              <Icon name="clock" size={12} />&nbsp;Last synced just now
+            </span>
+            <Link href="/subscriptions" onClick={onClose}>
+              <Btn size="sm" variant="ghost">View subscriptions</Btn>
+            </Link>
+            <Btn size="sm" variant="primary" onClick={onClose}>Done</Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function useSync() {
+  const ctx = useContext(SyncContext)
+  if (!ctx) throw new Error("useSync must be used within SyncProvider")
+  return ctx
+}

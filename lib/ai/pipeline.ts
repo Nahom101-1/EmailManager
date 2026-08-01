@@ -141,7 +141,9 @@ export async function runEmailIntelligence(input: {
   origin: string
 }): Promise<{ embedded: number; classified: number; clusters: number; backlogRemaining: number }> {
   const settings = getAiSettings()
-  const allowLlm = settings.cloudAiEnabled
+  // Cloud LLM extract only when cloud AI is on AND content scope is enabled.
+  const allowContent = Boolean(settings.scopes.content)
+  const allowLlm = settings.cloudAiEnabled && allowContent
 
   void warmIntentPrototypes().catch(() => {})
 
@@ -158,11 +160,15 @@ export async function runEmailIntelligence(input: {
     }
   }
 
-  await maybeFetchBodies({
-    providerId: input.providerId,
-    origin: input.origin,
-    emails,
-  })
+  // Body fetch is local-only storage; still respect content scope as the
+  // privacy contract for reading message contents at all.
+  if (allowContent) {
+    await maybeFetchBodies({
+      providerId: input.providerId,
+      origin: input.origin,
+      emails,
+    })
+  }
 
   // Batch-embed emails that still lack vectors.
   const needEmbed = emails.filter((e) => !getEmailEmbedding(e.id))
@@ -213,11 +219,12 @@ export async function runEmailIntelligence(input: {
       extract = await extractFields({
         from: email.from_address,
         subject: email.subject,
-        snippet: email.snippet,
-        bodyText: email.body_text,
+        snippet: allowContent ? email.snippet : null,
+        bodyText: allowContent ? email.body_text : null,
         intent: intentResult.intent,
         uncertain: intentResult.uncertain,
         allowLlm: useLlm,
+        allowContent,
       })
       if (extract.source === "llm") llmExtracts += 1
     }

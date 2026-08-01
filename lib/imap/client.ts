@@ -1,6 +1,10 @@
 import { ImapFlow } from "imapflow"
 import type { ImapConfig, ConnectionTestResult, RawEmail } from "@/types/provider"
 
+/** Align with Gmail crawl target / page size. */
+export const IMAP_HISTORY_TARGET = 2000
+export const IMAP_MESSAGES_PER_SYNC = 400
+
 export function createImapClient(config: ImapConfig): ImapFlow {
   const email = config.email.trim()
   const username = config.username?.trim() || email
@@ -66,12 +70,44 @@ function formatImapError(raw: string, config: ImapConfig) {
   )
 }
 
+/** Newest-first page of UIDs for capped crawl (pure helper for tests). */
+export function pageImapUids(input: {
+  uids: number[]
+  offset: number
+  pageSize: number
+  historyTarget: number
+}): { page: number[]; nextOffset: number; complete: boolean; considered: number } {
+  const newestFirst = [...input.uids].sort((a, b) => b - a)
+  const considered = newestFirst.slice(0, input.historyTarget)
+  const offset = Math.max(0, input.offset)
+  const page = considered.slice(offset, offset + input.pageSize)
+  const nextOffset = offset + page.length
+  const complete = nextOffset >= considered.length || page.length === 0
+  return { page, nextOffset, complete, considered: considered.length }
+}
+
 export async function fetchEmails(
   config: ImapConfig,
   providerId: string,
-  folder = "INBOX",
-  since?: Date
-): Promise<RawEmail[]> {
+  options?: {
+    folder?: string
+    since?: Date
+    /** Resume offset into newest-first UID list. */
+    offset?: number
+    maxMessages?: number
+    historyTarget?: number
+  }
+): Promise<{
+  emails: RawEmail[]
+  nextOffset: number
+  complete: boolean
+  considered: number
+}> {
+  const folder = options?.folder ?? "INBOX"
+  const maxMessages = options?.maxMessages ?? IMAP_MESSAGES_PER_SYNC
+  const historyTarget = options?.historyTarget ?? IMAP_HISTORY_TARGET
+  const offset = options?.offset ?? 0
+
   const client = createImapClient(config)
   const emails: RawEmail[] = []
 
@@ -80,16 +116,24 @@ export async function fetchEmails(
     const lock = await client.getMailboxLock(folder)
 
     try {
-      const sinceDate = since ?? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+      const sinceDate = options?.since ?? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
       const searchResults = await client.search({ since: sinceDate })
 
       if (!searchResults || searchResults.length === 0) {
-        return emails
+        return { emails, nextOffset: 0, complete: true, considered: 0 }
       }
 
-      const uids = searchResults
+      const { page: uids, nextOffset, complete, considered } = pageImapUids({
+        uids: searchResults,
+        offset,
+        pageSize: maxMessages,
+        historyTarget,
+      })
 
-      // Fetch in batches of 50 to avoid memory issues
+      if (uids.length === 0) {
+        return { emails, nextOffset, complete: true, considered }
+      }
+
       const batchSize = 50
       for (let i = 0; i < uids.length; i += batchSize) {
         const batch = uids.slice(i, i + batchSize)
@@ -119,18 +163,21 @@ export async function fetchEmails(
           })
         }
       }
+
+      return { emails, nextOffset, complete, considered }
     } finally {
       lock.release()
     }
-
-    await client.logout()
   } catch (err) {
     throw new Error(`IMAP fetch failed: ${err instanceof Error ? err.message : "Unknown error"}`)
   } finally {
+    try {
+      await client.logout()
+    } catch {
+      /* already closed */
+    }
     client.close()
   }
-
-  return emails
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

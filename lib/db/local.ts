@@ -340,21 +340,43 @@ export function countProviderEmails(providerId: string): number {
   return row.count
 }
 
+const STUCK_SYNC_MESSAGE =
+  "Previous sync was interrupted — tap Retry to continue. Progress is saved."
+
 /** Mark sync_runs stuck in "running" longer than maxAgeMs as errored. */
-export function reclaimStaleSyncRuns(maxAgeMs = 15 * 60 * 1000) {
+export function reclaimStaleSyncRuns(maxAgeMs = 15 * 60 * 1000): number {
+  const database = getDb()
   const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
-  getDb()
+  const now = new Date().toISOString()
+
+  const staleRuns = database
     .prepare(
       `
       update sync_runs
       set status = 'error',
           finished_at = ?,
-          error = coalesce(error, 'Sync timed out or process exited')
+          error = coalesce(error, ?)
       where status = 'running' and started_at < ?
     `
     )
-    .run(new Date().toISOString(), cutoff)
+    .run(now, STUCK_SYNC_MESSAGE, cutoff)
+
+  // Providers left in "syncing" with no live run — clear so Retry works.
+  const stuckProviders = database
+    .prepare(
+      `
+      update providers
+      set status = 'error',
+          error_message = ?
+      where status = 'syncing'
+        and id not in (select provider_id from sync_runs where status = 'running')
+    `
+    )
+    .run(STUCK_SYNC_MESSAGE)
+
+  return staleRuns.changes + stuckProviders.changes
 }
+
 
 export function deleteProvider(providerId: string) {
   const database = getDb()
@@ -1385,6 +1407,13 @@ function migrateEmailIntelligence(database: Database.Database) {
     ["sender", "text"],
     ["centroid", "blob"],
   ])
+
+  ensureColumns(database, "email_intelligence", [["content_fp", "text"]])
+
+  database.exec(`
+    create index if not exists email_intelligence_content_fp_idx
+      on email_intelligence(content_fp);
+  `)
 
   // FTS5 index for hybrid keyword search. content='' means we maintain it manually.
   const fts = database

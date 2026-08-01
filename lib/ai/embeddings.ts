@@ -102,6 +102,12 @@ function parseExtractorOutput(data: Float32Array | number[], count: number): Flo
   return out
 }
 
+/** Probe which backend will be used for new embeddings. */
+export async function resolveActiveEmbeddingModel(): Promise<string> {
+  const extractor = await getExtractor()
+  return extractor ? TRANSFORMER_MODEL : FALLBACK_MODEL
+}
+
 export async function embedText(text: string): Promise<{ vector: Float32Array; model: string }> {
   const [result] = await embedTexts([text])
   return result

@@ -1,7 +1,8 @@
 import Link from "next/link"
 import { connection } from "next/server"
 import { Btn, Card, Icon, Provider, StatusBadge } from "@/components/ui"
-import { SyncAllButton, SyncButton } from "@/components/shell/SyncButtons"
+import { SyncAllButton } from "@/components/shell/SyncButtons"
+import { InboxSyncActions } from "@/components/shell/InboxSyncActions"
 import {
   countEmailsByProvider,
   countEmailsSince,
@@ -9,6 +10,7 @@ import {
   getLocalUserId,
   listProviders,
   listSyncRuns,
+  reclaimStaleSyncRuns,
   type LocalSyncRun,
 } from "@/lib/db/local"
 import { getOverviewStats } from "@/lib/db/intelligence"
@@ -27,6 +29,7 @@ function runDesc(run: LocalSyncRun): string {
 
 export default async function InboxSyncPage() {
   await connection()
+  reclaimStaleSyncRuns()
   const userId = getLocalUserId()
   const providers = listProviders(userId)
   const stats = getDashboardStats(userId)
@@ -134,18 +137,12 @@ export default async function InboxSyncPage() {
                           : "never synced"}
                       </div>
                     </div>
-                    {ib.status === "error" ? (
-                      <Link href="/connect">
-                        <Btn size="xs" variant="danger" icon="alert">
-                          Fix
-                        </Btn>
-                      </Link>
-                    ) : (
-                      <SyncButton
-                        target={{ id: ib.id, email: ib.email }}
-                        label={ib.history_complete ? "Sync" : "Continue"}
-                      />
-                    )}
+                    <InboxSyncActions
+                      target={{ id: ib.id, email: ib.email }}
+                      status={ib.status}
+                      errorMessage={ib.error_message}
+                      historyComplete={ib.history_complete}
+                    />
                   </div>
                 )
               })}

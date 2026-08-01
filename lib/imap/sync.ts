@@ -1,9 +1,12 @@
 import {
+  countProviderEmails,
   createSyncRun,
   finishSyncRun,
   getEmailIdMap,
   getProvider,
   hasRunningSyncRun,
+  reclaimStaleSyncRuns,
+  updateProviderHistoryCursor,
   updateProviderSyncStatus,
   upsertDetectedAccounts,
   upsertDetectedSubscriptions,
@@ -14,11 +17,19 @@ import {
 } from "@/lib/db/local"
 import { detectAccount, detectSubscription } from "@/lib/detection"
 import { decryptPassword } from "@/lib/crypto/credentials"
-import { fetchEmails } from "@/lib/imap/client"
+import {
+  fetchEmails,
+  IMAP_HISTORY_TARGET,
+  IMAP_MESSAGES_PER_SYNC,
+} from "@/lib/imap/client"
 import type { ImapConfig } from "@/types/provider"
 import { runEmailIntelligence } from "@/lib/ai/pipeline"
 
-export async function syncImapProvider(input: { providerId: string }) {
+export async function syncImapProvider(input: {
+  providerId: string
+  historyTarget?: number
+  messagesPerSync?: number
+}) {
   const provider = getProvider(input.providerId)
   if (!provider || provider.type !== "imap") {
     throw new Error("Provider is not a connected IMAP account")
@@ -32,11 +43,17 @@ export async function syncImapProvider(input: { providerId: string }) {
     throw new Error("IMAP provider has no stored password. Reconnect the account.")
   }
 
+  reclaimStaleSyncRuns()
   if (hasRunningSyncRun(input.providerId)) {
     throw new Error("A sync is already running for this account")
   }
 
   const password = decryptPassword(provider.encrypted_password)
+  const historyTarget = input.historyTarget ?? provider.history_target ?? IMAP_HISTORY_TARGET
+  const messagesPerSync = input.messagesPerSync ?? IMAP_MESSAGES_PER_SYNC
+  const resumeOffset = provider.history_complete
+    ? 0
+    : Math.max(0, Number.parseInt(provider.history_page_token ?? "0", 10) || 0)
 
   const config: ImapConfig = {
     host: provider.host,
@@ -51,9 +68,19 @@ export async function syncImapProvider(input: { providerId: string }) {
   updateProviderSyncStatus({ providerId: input.providerId, status: "syncing", errorMessage: null })
 
   try {
-    const rawEmails = await fetchEmails(config, input.providerId)
+    // After history complete: only pull a small newest page for incremental updates.
+    const fetchOffset = provider.history_complete ? 0 : resumeOffset
+    const fetchMax = provider.history_complete
+      ? Math.min(100, messagesPerSync)
+      : messagesPerSync
 
-    const messages: GmailMessageInput[] = rawEmails.map((raw) => ({
+    const fetched = await fetchEmails(config, input.providerId, {
+      offset: fetchOffset,
+      maxMessages: fetchMax,
+      historyTarget,
+    })
+
+    const messages: GmailMessageInput[] = fetched.emails.map((raw) => ({
       providerId: raw.providerId,
       gmailMessageId: raw.messageId,
       threadId: undefined,
@@ -117,20 +144,29 @@ export async function syncImapProvider(input: { providerId: string }) {
     const subscriptionsDetected = upsertDetectedSubscriptions({ records: subscriptionRecords })
     const accountsDetected = upsertDetectedAccounts({ records: accountRecords })
 
-    updateProviderSyncStatus({
-      providerId: input.providerId,
-      status: "active",
-      lastSyncAt: new Date().toISOString(),
-      errorMessage: null,
-    })
+    const uniqueStored = countProviderEmails(input.providerId)
+    let historyComplete = provider.history_complete
+    let persistToken: string | null = null
 
-    finishSyncRun({
-      id: syncRunId,
-      status: "success",
-      emailsSeen: rawEmails.length,
-      emailsStored: stored,
-      subscriptionsDetected,
-      accountsDetected,
+    if (!provider.history_complete) {
+      const hitTarget = uniqueStored >= historyTarget
+      historyComplete = hitTarget || fetched.complete
+      persistToken = historyComplete ? null : String(fetched.nextOffset)
+    }
+
+    const newestInternalDate = messages.reduce<string | null>((best, m) => {
+      if (!m.date) return best
+      if (!best || m.date > best) return m.date
+      return best
+    }, provider.newest_internal_date)
+
+    updateProviderHistoryCursor({
+      providerId: input.providerId,
+      historyPageToken: persistToken,
+      historySyncedCount: uniqueStored,
+      historyComplete,
+      historyTarget,
+      newestInternalDate,
     })
 
     // Best-effort incremental intelligence (snippet-only for IMAP — no body fetch).
@@ -143,12 +179,35 @@ export async function syncImapProvider(input: { providerId: string }) {
       console.warn("[imap-sync] intelligence pipeline skipped:", err)
     }
 
+    updateProviderSyncStatus({
+      providerId: input.providerId,
+      status: "active",
+      lastSyncAt: new Date().toISOString(),
+      errorMessage: null,
+    })
+
+    finishSyncRun({
+      id: syncRunId,
+      status: "success",
+      emailsSeen: fetched.emails.length,
+      emailsStored: stored,
+      subscriptionsDetected,
+      accountsDetected,
+    })
+
     return {
-      listed: rawEmails.length,
+      listed: fetched.emails.length,
       stored,
       subscriptionsDetected,
       accountsDetected,
       intelligence,
+      history: {
+        synced: uniqueStored,
+        target: historyTarget,
+        complete: historyComplete,
+        pageTokenPresent: Boolean(persistToken),
+        mode: provider.history_complete ? "recent" : "crawl",
+      },
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "IMAP sync failed"

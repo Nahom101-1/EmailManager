@@ -3,15 +3,23 @@
  * embed (batched) → intent → extract → incremental cluster → FTS → overview rollups.
  */
 
-import { emailEmbedText, embedTexts, EMBEDDING_DIMS } from "@/lib/ai/embeddings"
+import {
+  emailEmbedText,
+  embedTexts,
+  EMBEDDING_DIMS,
+  resolveActiveEmbeddingModel,
+} from "@/lib/ai/embeddings"
 import { classifyIntent, warmIntentPrototypes } from "@/lib/ai/intent"
 import { assignToClusters, clusterToEmailCluster, type ClusterableEmail } from "@/lib/ai/cluster"
 import { extractFields, isHighSignal } from "@/lib/ai/extract"
+import { contentFingerprint, isNoiseCandidate } from "@/lib/ai/near-dup"
 import { invalidateEmbeddingCache } from "@/lib/ai/vector-cache"
 import { getAiSettings, getGoogleAccount, getLocalUserId } from "@/lib/db/local"
 import { getValidGoogleAccessToken } from "@/lib/google/oauth"
 import {
   countEmailsNeedingIntelligence,
+  deleteEmbeddingsNotMatchingModel,
+  findEmailByContentFp,
   getClusterRebuildDebt,
   getEmailEmbedding,
   listAllEmbeddings,
@@ -22,6 +30,7 @@ import {
   setClusterRebuildDebt,
   updateEmailBodyText,
   updateEmailClusterIds,
+  upsertEmailEmbedding,
   upsertEmailEmbeddingsBatch,
   upsertEmailFts,
   upsertEmailIntelligence,
@@ -139,8 +148,13 @@ export async function runEmailIntelligence(input: {
 
   void warmIntentPrototypes().catch(() => {})
 
-  const emails = listEmailsNeedingIntelligence(input.providerId, MAX_PER_RUN)
-  const backlogBefore = countEmailsNeedingIntelligence(input.providerId)
+  // Pin one embedding space: purge hash vectors once MiniLM is available (or vice versa).
+  const preferredModel = await resolveActiveEmbeddingModel()
+  const purged = deleteEmbeddingsNotMatchingModel(preferredModel)
+  if (purged > 0) invalidateEmbeddingCache()
+
+  const emails = listEmailsNeedingIntelligence(input.providerId, MAX_PER_RUN, preferredModel)
+  const backlogBefore = countEmailsNeedingIntelligence(input.providerId, preferredModel)
 
   if (emails.length === 0) {
     refreshOverviewRollups(getLocalUserId())
@@ -162,8 +176,65 @@ export async function runEmailIntelligence(input: {
     })
   }
 
-  // Batch-embed emails that still lack vectors.
-  const needEmbed = emails.filter((e) => !getEmailEmbedding(e.id))
+  // Collapse newsletter/promo near-dups before embedding.
+  const nearDupSkipped = new Set<string>()
+  for (const email of emails) {
+    const labels = safeJsonParse<string[]>(email.labels, [])
+    const headers = safeJsonParse<Record<string, string>>(email.headers, {})
+    if (
+      !isNoiseCandidate({
+        from: email.from_address,
+        subject: email.subject,
+        snippet: email.snippet,
+        labels,
+        headers,
+      })
+    ) {
+      continue
+    }
+    const fp = contentFingerprint({
+      from: email.from_address,
+      subject: email.subject,
+      snippet: email.snippet,
+    })
+    const existing = findEmailByContentFp(input.providerId, fp, email.id)
+    if (!existing) continue
+
+    const donor = getEmailEmbedding(existing.emailId)
+    if (donor && donor.model === preferredModel) {
+      upsertEmailEmbedding({
+        emailId: email.id,
+        model: donor.model,
+        dims: donor.dims,
+        vector: donor.vector,
+      })
+    }
+
+    upsertEmailIntelligence({
+      emailId: email.id,
+      intent: "newsletter",
+      intentConfidence: 0.7,
+      uncertain: false,
+      clusterId: existing.clusterId,
+      reasons: ["Near-duplicate newsletter/promo — skipped unique embed"],
+      contentFp: fp,
+    })
+    upsertEmailFts({
+      emailId: email.id,
+      subject: email.subject,
+      snippet: email.snippet,
+      fromAddress: email.from_address,
+      bodyText: email.body_text,
+    })
+    nearDupSkipped.add(email.id)
+  }
+
+  // Batch-embed emails that still lack the preferred model vector.
+  const needEmbed = emails.filter((e) => {
+    if (nearDupSkipped.has(e.id)) return false
+    const emb = getEmailEmbedding(e.id)
+    return !emb || emb.model !== preferredModel
+  })
   const texts = needEmbed.map((e) =>
     emailEmbedText({
       from: e.from_address,
@@ -190,12 +261,22 @@ export async function runEmailIntelligence(input: {
   const newlyClassified: ClusterableEmail[] = []
 
   for (const email of emails) {
+    if (nearDupSkipped.has(email.id)) {
+      classified += 1
+      continue
+    }
+
     const emb = getEmailEmbedding(email.id)
     if (!emb) continue
     const vector = emb.vector
 
     const labels = safeJsonParse<string[]>(email.labels, [])
     const headers = safeJsonParse<Record<string, string>>(email.headers, {})
+    const fp = contentFingerprint({
+      from: email.from_address,
+      subject: email.subject,
+      snippet: email.snippet,
+    })
     const intentResult = classifyIntent({
       from: email.from_address,
       subject: email.subject,
@@ -228,6 +309,7 @@ export async function runEmailIntelligence(input: {
       uncertain: intentResult.uncertain,
       extract,
       reasons: intentResult.reasons,
+      contentFp: fp,
     })
 
     upsertEmailFts({

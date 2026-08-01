@@ -38,11 +38,30 @@ export interface StoredIntelligence {
   updated_at: string
 }
 
-/** Emails missing embeddings or intelligence rows, newest first. */
+/** Emails missing embeddings (or wrong model) or intelligence rows, newest first. */
 export function listEmailsNeedingIntelligence(
   providerId: string,
-  limit = 300
+  limit = 300,
+  preferredModel?: string | null
 ): EmailForIntelligence[] {
+  if (preferredModel) {
+    return getDb()
+      .prepare(
+        `
+      select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
+             e.date, e.labels, e.headers, e.gmail_message_id
+      from emails e
+      left join email_embeddings emb on emb.email_id = e.id
+      left join email_intelligence i on i.email_id = e.id
+      where e.provider_id = ?
+        and (emb.email_id is null or emb.model != ? or i.email_id is null)
+      order by coalesce(e.date, e.created_at) desc
+      limit ?
+    `
+      )
+      .all(providerId, preferredModel, limit) as EmailForIntelligence[]
+  }
+
   return getDb()
     .prepare(
       `
@@ -59,7 +78,27 @@ export function listEmailsNeedingIntelligence(
     .all(providerId, limit) as EmailForIntelligence[]
 }
 
-export function countEmailsNeedingIntelligence(providerId: string): number {
+export function countEmailsNeedingIntelligence(
+  providerId: string,
+  preferredModel?: string | null
+): number {
+  if (preferredModel) {
+    return (
+      getDb()
+        .prepare(
+          `
+      select count(*) as count
+      from emails e
+      left join email_embeddings emb on emb.email_id = e.id
+      left join email_intelligence i on i.email_id = e.id
+      where e.provider_id = ?
+        and (emb.email_id is null or emb.model != ? or i.email_id is null)
+    `
+        )
+        .get(providerId, preferredModel) as { count: number }
+    ).count
+  }
+
   return (
     getDb()
       .prepare(
@@ -73,6 +112,33 @@ export function countEmailsNeedingIntelligence(providerId: string): number {
       )
       .get(providerId) as { count: number }
   ).count
+}
+
+/** Drop vectors from a non-preferred model so search stays in one space. */
+export function deleteEmbeddingsNotMatchingModel(model: string): number {
+  return getDb().prepare("delete from email_embeddings where model != ?").run(model).changes
+}
+
+export function findEmailByContentFp(
+  providerId: string,
+  contentFp: string,
+  excludeEmailId?: string
+): { emailId: string; clusterId: string | null } | null {
+  const row = getDb()
+    .prepare(
+      `
+      select i.email_id as emailId, i.cluster_id as clusterId
+      from email_intelligence i
+      join emails e on e.id = i.email_id
+      where e.provider_id = ? and i.content_fp = ?
+        and (? is null or i.email_id != ?)
+      limit 1
+    `
+    )
+    .get(providerId, contentFp, excludeEmailId ?? null, excludeEmailId ?? null) as
+    | { emailId: string; clusterId: string | null }
+    | undefined
+  return row ?? null
 }
 
 /** @deprecated use listEmailsNeedingIntelligence */
@@ -232,6 +298,7 @@ export function upsertEmailIntelligence(input: {
   clusterId?: string | null
   extract?: ExtractedFields | null
   reasons: string[]
+  contentFp?: string | null
 }) {
   const now = new Date().toISOString()
   getDb()
@@ -240,11 +307,11 @@ export function upsertEmailIntelligence(input: {
       insert into email_intelligence (
         email_id, intent, intent_confidence, uncertain, cluster_id,
         vendor, amount, currency, billing_cycle, due_date,
-        extract_confidence, extract_source, reasons, updated_at
+        extract_confidence, extract_source, reasons, content_fp, updated_at
       ) values (
         @emailId, @intent, @intentConfidence, @uncertain, @clusterId,
         @vendor, @amount, @currency, @billingCycle, @dueDate,
-        @extractConfidence, @extractSource, @reasons, @updatedAt
+        @extractConfidence, @extractSource, @reasons, @contentFp, @updatedAt
       )
       on conflict(email_id) do update set
         intent = excluded.intent,
@@ -259,6 +326,7 @@ export function upsertEmailIntelligence(input: {
         extract_confidence = coalesce(excluded.extract_confidence, email_intelligence.extract_confidence),
         extract_source = coalesce(excluded.extract_source, email_intelligence.extract_source),
         reasons = excluded.reasons,
+        content_fp = coalesce(excluded.content_fp, email_intelligence.content_fp),
         updated_at = excluded.updated_at
     `
     )
@@ -276,6 +344,7 @@ export function upsertEmailIntelligence(input: {
       extractConfidence: input.extract?.confidence ?? null,
       extractSource: input.extract?.source ?? null,
       reasons: JSON.stringify(input.reasons),
+      contentFp: input.contentFp ?? null,
       updatedAt: now,
     })
 }

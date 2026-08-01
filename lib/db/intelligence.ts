@@ -986,6 +986,92 @@ export function getEndingTrials(days = 14): EndingTrial[] {
     .all(today, cutoff) as EndingTrial[]
 }
 
+export interface PriceChange {
+  vendor: string
+  previousAmount: number
+  newAmount: number
+  currency: string | null
+  emailId: string
+}
+
+/** Vendors whose extracted amount differs from an earlier extract. */
+export function getPriceChanges(limit = 6): PriceChange[] {
+  const rows = getDb()
+    .prepare(
+      `
+      select i.vendor, i.amount, i.currency, i.email_id, e.date
+      from email_intelligence i
+      join emails e on e.id = i.email_id
+      where i.vendor is not null and i.amount is not null
+        and i.intent in ('receipt', 'renewal')
+      order by i.vendor collate nocase, e.date asc
+    `
+    )
+    .all() as Array<{
+    vendor: string
+    amount: number
+    currency: string | null
+    email_id: string
+    date: string | null
+  }>
+
+  const lastByVendor = new Map<string, number>()
+  const changes: PriceChange[] = []
+
+  for (const row of rows) {
+    const key = row.vendor.toLowerCase()
+    const prev = lastByVendor.get(key)
+    if (prev != null && Math.abs(prev - row.amount) >= 0.01) {
+      changes.push({
+        vendor: row.vendor,
+        previousAmount: prev,
+        newAmount: row.amount,
+        currency: row.currency,
+        emailId: row.email_id,
+      })
+    }
+    lastByVendor.set(key, row.amount)
+  }
+
+  return changes.slice(-limit).reverse()
+}
+
+export interface SecuritySpike {
+  recentCount: number
+  priorCount: number
+  isSpike: boolean
+  windowDays: number
+}
+
+/** Compare security-intent volume in the last N days vs the prior N days. */
+export function getSecuritySpike(windowDays = 7): SecuritySpike {
+  const now = Date.now()
+  const recentStart = new Date(now - windowDays * 86_400_000).toISOString()
+  const priorStart = new Date(now - windowDays * 2 * 86_400_000).toISOString()
+
+  const countBetween = (from: string, to: string) => {
+    const row = getDb()
+      .prepare(
+        `
+        select count(*) as count
+        from email_intelligence i
+        join emails e on e.id = i.email_id
+        where i.intent = 'security'
+          and e.date is not null
+          and e.date >= ? and e.date < ?
+      `
+      )
+      .get(from, to) as { count: number }
+    return row.count
+  }
+
+  const recentCount = countBetween(recentStart, new Date(now).toISOString())
+  const priorCount = countBetween(priorStart, recentStart)
+  const isSpike = recentCount >= 3 && recentCount >= Math.max(2, priorCount * 2)
+
+  return { recentCount, priorCount, isSpike, windowDays }
+}
+
 function safeJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback
   try {

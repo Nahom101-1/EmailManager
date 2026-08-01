@@ -59,13 +59,19 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => setToasts((l) => l.filter((x) => x.id !== id)), 3200)
   }, [])
 
-  const startSync = useCallback((targets: SyncTarget[], label?: string) => {
-    if (targets.length === 0) {
-      toast("No inboxes to sync", "err")
-      return
-    }
-    setSync({ targets, label: label ?? (targets.length === 1 ? targets[0].email : `${targets.length} inboxes`) })
-  }, [toast])
+  const startSync = useCallback(
+    (targets: SyncTarget[], label?: string) => {
+      if (targets.length === 0) {
+        toast("No inboxes to sync", "err")
+        return
+      }
+      setSync({
+        targets,
+        label: label ?? (targets.length === 1 ? targets[0].email : `${targets.length} inboxes`),
+      })
+    },
+    [toast]
+  )
 
   const close = useCallback(() => {
     setSync(null)
@@ -75,7 +81,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   return (
     <SyncContext.Provider value={{ startSync, toast }}>
       {children}
-      {sync && <SyncModal targets={sync.targets} label={sync.label} onClose={close} onToast={toast} />}
+      {sync && (
+        <SyncModal targets={sync.targets} label={sync.label} onClose={close} onToast={toast} />
+      )}
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className="toast">
@@ -250,7 +258,10 @@ function SyncModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span className="mono-tile sm" style={{ color: "var(--accent)" }}>
-            <Icon name={done ? (errored ? "alert" : cancelled ? "pause" : "check") : "sync"} size={15} />
+            <Icon
+              name={done ? (errored ? "alert" : cancelled ? "pause" : "check") : "sync"}
+              size={15}
+            />
           </span>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 650, fontSize: 13.5 }}>
@@ -279,9 +290,16 @@ function SyncModal({
           {!done ? (
             <div className="steps">
               {STEPS.map((s, i) => (
-                <div key={s.k} className={"step " + (i < step ? "done" : i === step ? "active" : "")}>
+                <div
+                  key={s.k}
+                  className={"step " + (i < step ? "done" : i === step ? "active" : "")}
+                >
                   <span className="sdot">
-                    {i < step ? <Icon name="check" size={11} /> : i === step ? <span className="spin" /> : null}
+                    {i < step ? (
+                      <Icon name="check" size={11} />
+                    ) : i === step ? (
+                      <span className="spin" />
+                    ) : null}
                   </span>
                   {s.label}
                 </div>
@@ -309,18 +327,27 @@ function SyncModal({
                   { l: "Subscriptions", v: result.subscriptionsDetected },
                   { l: "Accounts", v: result.accountsDetected },
                 ].map((r) => (
-                  <div key={r.l} className="card" style={{ padding: 13, background: "var(--surface-inset)" }}>
+                  <div
+                    key={r.l}
+                    className="card"
+                    style={{ padding: 13, background: "var(--surface-inset)" }}
+                  >
                     <div className="stat" style={{ padding: 0, gap: 4 }}>
                       <span className="label">{r.l}</span>
-                      <span className="val" style={{ fontSize: 22 }}>{r.v.toLocaleString()}</span>
+                      <span className="val" style={{ fontSize: 22 }}>
+                        {r.v.toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="notice" style={{ marginTop: 12, padding: "10px 12px" }}>
                 <div className="body" style={{ fontSize: 12.5 }}>
-                  History: {result.historySynced.toLocaleString()} / {result.historyTarget.toLocaleString()}
-                  {result.historyComplete ? " · complete" : " · more remains — sync again to continue"}
+                  History: {result.historySynced.toLocaleString()} /{" "}
+                  {result.historyTarget.toLocaleString()}
+                  {result.historyComplete
+                    ? " · complete"
+                    : " · more remains — sync again to continue"}
                   {result.backlogRemaining > 0
                     ? ` · intelligence backlog ${result.backlogRemaining.toLocaleString()}`
                     : ""}
@@ -334,7 +361,8 @@ function SyncModal({
         {done && (
           <div className="modal-foot">
             <span className="faint mono center" style={{ fontSize: 11, marginRight: "auto" }}>
-              <Icon name="clock" size={12} />&nbsp;Last synced just now
+              <Icon name="clock" size={12} />
+              &nbsp;Last synced just now
             </span>
             {!result.historyComplete || result.backlogRemaining > 0 ? (
               <Btn
@@ -349,7 +377,9 @@ function SyncModal({
               </Btn>
             ) : (
               <Link href="/subscriptions" onClick={onClose}>
-                <Btn size="sm" variant="ghost">View subscriptions</Btn>
+                <Btn size="sm" variant="ghost">
+                  View subscriptions
+                </Btn>
               </Link>
             )}
           </div>

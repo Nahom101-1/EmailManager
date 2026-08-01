@@ -223,7 +223,13 @@ export function streamClaudeWithTools(
 
           const data = (await res.json()) as {
             stop_reason?: string
-            content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
+            content?: Array<{
+              type: string
+              text?: string
+              id?: string
+              name?: string
+              input?: Record<string, unknown>
+            }>
           }
 
           const content = data.content ?? []
@@ -241,7 +247,8 @@ export function streamClaudeWithTools(
           messages.push({
             role: "assistant",
             content: content.map((b) => {
-              if (b.type === "tool_use") return { type: "tool_use" as const, id: b.id!, name: b.name!, input: b.input ?? {} }
+              if (b.type === "tool_use")
+                return { type: "tool_use" as const, id: b.id!, name: b.name!, input: b.input ?? {} }
               return { type: "text" as const, text: b.text ?? "" }
             }),
           })
@@ -291,8 +298,15 @@ export function streamClaudeWithTools(
             const raw = line.slice(6).trim()
             if (raw === "[DONE]") continue
             try {
-              const evt = JSON.parse(raw) as { type: string; delta?: { type: string; text?: string } }
-              if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+              const evt = JSON.parse(raw) as {
+                type: string
+                delta?: { type: string; text?: string }
+              }
+              if (
+                evt.type === "content_block_delta" &&
+                evt.delta?.type === "text_delta" &&
+                evt.delta.text
+              ) {
                 controller.enqueue(sseMsg({ type: "delta", text: evt.delta.text }))
               }
             } catch {
@@ -328,10 +342,7 @@ export async function callAi(system: string, messages: ChatMessage[]): Promise<s
   throw new AiUnavailableError("No AI backend available. Set ANTHROPIC_API_KEY or start Ollama.")
 }
 
-export async function* streamAi(
-  system: string,
-  messages: ChatMessage[]
-): AsyncGenerator<string> {
+export async function* streamAi(system: string, messages: ChatMessage[]): AsyncGenerator<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
     const { ollamaAvailable, streamOllama } = await import("@/lib/ai/local")
@@ -370,8 +381,15 @@ export async function* streamAi(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue
       try {
-        const evt = JSON.parse(line.slice(6)) as { type: string; delta?: { type: string; text?: string } }
-        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+        const evt = JSON.parse(line.slice(6)) as {
+          type: string
+          delta?: { type: string; text?: string }
+        }
+        if (
+          evt.type === "content_block_delta" &&
+          evt.delta?.type === "text_delta" &&
+          evt.delta.text
+        ) {
           yield evt.delta.text
         }
       } catch {

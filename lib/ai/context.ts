@@ -65,7 +65,9 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
             .map(
               (p) =>
                 `${p.email} (${p.type}, ${p.status}` +
-                (p.last_sync_at ? `, last sync ${new Date(p.last_sync_at).toLocaleDateString()}` : "") +
+                (p.last_sync_at
+                  ? `, last sync ${new Date(p.last_sync_at).toLocaleDateString()}`
+                  : "") +
                 ")"
             )
             .join("; ") +
@@ -87,7 +89,10 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
       const withAmounts = active.filter((s) => s.amount != null).slice(0, 5)
       const noAmounts = active.filter((s) => s.amount == null).slice(0, 3)
       const parts = [
-        ...withAmounts.map((s) => `${s.company} ($${s.amount!.toFixed(2)}/${s.billing_cycle === "yearly" ? "yr" : "mo"})`),
+        ...withAmounts.map(
+          (s) =>
+            `${s.company} ($${s.amount!.toFixed(2)}/${s.billing_cycle === "yearly" ? "yr" : "mo"})`
+        ),
         ...noAmounts.map((s) => s.company),
       ]
       if (parts.length > 0) lines.push(`Active subscriptions: ${parts.join(", ")}.`)
@@ -115,7 +120,10 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
     if (review.length > 0) {
       lines.push(
         "Accounts needing review: " +
-          review.slice(0, 8).map((a) => a.company).join(", ") +
+          review
+            .slice(0, 8)
+            .map((a) => a.company)
+            .join(", ") +
           "."
       )
     }
@@ -161,12 +169,19 @@ export function buildBriefing(userId = getLocalUserId()): Briefing {
     .map((item) => {
       if ("category" in item) {
         const sub = item as SubWithAmount
-        const amtStr = sub.amount != null
-          ? ` · ${sub.billing_cycle === "yearly" ? `$${sub.amount.toFixed(2)}/yr` : `$${sub.amount.toFixed(2)}/mo`}`
-          : ""
-        return { t: `Confirm subscription — ${item.company}`, meta: `${item.category ?? "recurring"}${amtStr} · ${conf(item.confidence)}% match` }
+        const amtStr =
+          sub.amount != null
+            ? ` · ${sub.billing_cycle === "yearly" ? `$${sub.amount.toFixed(2)}/yr` : `$${sub.amount.toFixed(2)}/mo`}`
+            : ""
+        return {
+          t: `Confirm subscription — ${item.company}`,
+          meta: `${item.category ?? "recurring"}${amtStr} · ${conf(item.confidence)}% match`,
+        }
       }
-      return { t: `Review account — ${item.company}`, meta: `${(item as LocalAccount).domain ?? "service"} · ${conf(item.confidence)}% match` }
+      return {
+        t: `Review account — ${item.company}`,
+        meta: `${(item as LocalAccount).domain ?? "service"} · ${conf(item.confidence)}% match`,
+      }
     })
 
   // Can wait: confirmed-active items, surfaced lightly.
@@ -176,13 +191,19 @@ export function buildBriefing(userId = getLocalUserId()): Briefing {
   if (activeSubs.length > 0) {
     canWait.push({
       t: `${activeSubs.length} active subscription${activeSubs.length === 1 ? "" : "s"} tracked`,
-      meta: activeSubs.slice(0, 3).map((s) => s.company).join(", "),
+      meta: activeSubs
+        .slice(0, 3)
+        .map((s) => s.company)
+        .join(", "),
     })
   }
   if (activeAccts.length > 0) {
     canWait.push({
       t: `${activeAccts.length} account${activeAccts.length === 1 ? "" : "s"} confirmed active`,
-      meta: activeAccts.slice(0, 3).map((a) => a.company).join(", "),
+      meta: activeAccts
+        .slice(0, 3)
+        .map((a) => a.company)
+        .join(", "),
     })
   }
 
@@ -196,13 +217,24 @@ export function buildBriefing(userId = getLocalUserId()): Briefing {
       meta: "Hidden from your active view",
     })
   }
-  const lowConf = [...subs, ...accounts].filter((x) => x.status === "unknown" && (x.confidence ?? 0) < 0.5)
+  const lowConf = [...subs, ...accounts].filter(
+    (x) => x.status === "unknown" && (x.confidence ?? 0) < 0.5
+  )
   if (lowConf.length > 0) {
-    ignore.push({ t: `${lowConf.length} low-confidence guesses`, meta: "Under 50% — probably noise" })
+    ignore.push({
+      t: `${lowConf.length} low-confidence guesses`,
+      meta: "Under 50% — probably noise",
+    })
   }
 
   const inboxLoad: Briefing["inboxLoad"] =
-    newSinceLast === 0 ? "Quiet" : newSinceLast < 20 ? "Light" : newSinceLast < 60 ? "Normal" : "Busy"
+    newSinceLast === 0
+      ? "Quiet"
+      : newSinceLast < 20
+        ? "Light"
+        : newSinceLast < 60
+          ? "Normal"
+          : "Busy"
 
   return { newSinceLast, needsReply, inboxLoad, dealFirst, canWait, ignore }
 }

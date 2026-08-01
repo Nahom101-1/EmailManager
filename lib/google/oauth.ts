@@ -65,7 +65,7 @@ export async function exchangeGoogleCode(input: {
     throw new Error(`Google token exchange failed: ${await res.text()}`)
   }
 
-  return await res.json() as {
+  return (await res.json()) as {
     access_token: string
     refresh_token?: string
     expires_in?: number
@@ -94,7 +94,7 @@ export async function refreshGoogleAccessToken(input: {
     throw new Error(`Google token refresh failed: ${await res.text()}`)
   }
 
-  return await res.json() as {
+  return (await res.json()) as {
     access_token: string
     expires_in?: number
     scope?: string
@@ -102,10 +102,7 @@ export async function refreshGoogleAccessToken(input: {
   }
 }
 
-export async function getValidGoogleAccessToken(input: {
-  account: GoogleAccount
-  origin: string
-}) {
+export async function getValidGoogleAccessToken(input: { account: GoogleAccount; origin: string }) {
   const expiresAt = input.account.expires_at ? new Date(input.account.expires_at).getTime() : 0
   const refreshWindowMs = 2 * 60 * 1000
 
@@ -114,7 +111,9 @@ export async function getValidGoogleAccessToken(input: {
   }
 
   if (!input.account.encrypted_refresh_token) {
-    throw new Error("Google refresh token is missing. Reconnect the account to grant offline access.")
+    throw new Error(
+      "Google refresh token is missing. Reconnect the account to grant offline access."
+    )
   }
 
   const { clientId, clientSecret } = getGoogleOAuthConfig(input.origin)
@@ -145,7 +144,7 @@ export async function getGmailProfile(accessToken: string) {
     throw new Error(`Gmail profile request failed: ${await res.text()}`)
   }
 
-  return await res.json() as {
+  return (await res.json()) as {
     emailAddress: string
     messagesTotal?: number
     threadsTotal?: number

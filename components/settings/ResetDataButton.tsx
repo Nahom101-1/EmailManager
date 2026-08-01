@@ -23,13 +23,19 @@ export function ResetDataButton() {
   if (confirming) {
     return (
       <div className="btn-row">
-        <Btn size="sm" variant="danger" disabled={busy} onClick={reset}>{busy ? "Erasing…" : "Yes, erase everything"}</Btn>
-        <Btn size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>Cancel</Btn>
+        <Btn size="sm" variant="danger" disabled={busy} onClick={reset}>
+          {busy ? "Erasing…" : "Yes, erase everything"}
+        </Btn>
+        <Btn size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>
+          Cancel
+        </Btn>
       </div>
     )
   }
 
   return (
-    <Btn size="sm" variant="danger" icon="trash" onClick={() => setConfirming(true)}>Clear</Btn>
+    <Btn size="sm" variant="danger" icon="trash" onClick={() => setConfirming(true)}>
+      Clear
+    </Btn>
   )
 }

@@ -54,11 +54,7 @@ export function TopbarSearch() {
 
   useEffect(() => {
     const q = query.trim()
-    if (q.length < 2) {
-      setEmails([])
-      setEntities([])
-      return
-    }
+    if (q.length < 2) return
 
     const handle = window.setTimeout(() => {
       startTransition(async () => {
@@ -78,6 +74,14 @@ export function TopbarSearch() {
     return () => window.clearTimeout(handle)
   }, [query])
 
+  function onQueryChange(value: string) {
+    setQuery(value)
+    if (value.trim().length < 2) {
+      setEmails([])
+      setEntities([])
+    }
+  }
+
   const hasResults = emails.length > 0 || entities.length > 0
 
   return (
@@ -86,7 +90,7 @@ export function TopbarSearch() {
       <input
         ref={inputRef}
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => onQueryChange(e.target.value)}
         onFocus={() => query.trim().length >= 2 && setOpen(true)}
         placeholder="Search emails, subscriptions…"
         aria-label="Search"
@@ -107,13 +111,21 @@ export function TopbarSearch() {
             boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
           }}
         >
-          {pending && <div className="row-sub" style={{ padding: 6 }}>Searching…</div>}
+          {pending && (
+            <div className="row-sub" style={{ padding: 6 }}>
+              Searching…
+            </div>
+          )}
           {!pending && !hasResults && (
-            <div className="row-sub" style={{ padding: 6 }}>No matches</div>
+            <div className="row-sub" style={{ padding: 6 }}>
+              No matches
+            </div>
           )}
           {entities.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div className="side-label" style={{ margin: "4px 6px" }}>Subscriptions & accounts</div>
+              <div className="side-label" style={{ margin: "4px 6px" }}>
+                Subscriptions & accounts
+              </div>
               {entities.map((e) => (
                 <Link
                   key={`${e.kind}-${e.id}`}
@@ -122,7 +134,9 @@ export function TopbarSearch() {
                   style={{ width: "100%" }}
                   onClick={() => setOpen(false)}
                 >
-                  <span className="nav-ic"><Icon name={e.kind === "subscription" ? "subs" : "accounts"} size={14} /></span>
+                  <span className="nav-ic">
+                    <Icon name={e.kind === "subscription" ? "subs" : "accounts"} size={14} />
+                  </span>
                   <div>
                     <div style={{ fontSize: 13 }}>{e.title}</div>
                     <div className="row-sub">{e.meta}</div>
@@ -133,7 +147,9 @@ export function TopbarSearch() {
           )}
           {emails.length > 0 && (
             <div>
-              <div className="side-label" style={{ margin: "4px 6px" }}>Emails</div>
+              <div className="side-label" style={{ margin: "4px 6px" }}>
+                Emails
+              </div>
               {emails.map((e) => (
                 <Link
                   key={e.emailId}
@@ -142,12 +158,24 @@ export function TopbarSearch() {
                   style={{ width: "100%" }}
                   onClick={() => setOpen(false)}
                 >
-                  <span className="nav-ic"><Icon name="sync" size={14} /></span>
+                  <span className="nav-ic">
+                    <Icon name="sync" size={14} />
+                  </span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
                       {e.subject ?? "(no subject)"}
                     </div>
-                    <div className="row-sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div
+                      className="row-sub"
+                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
                       {(e.intent ? `${e.intent} · ` : "") + (e.fromAddress ?? "")}
                     </div>
                   </div>

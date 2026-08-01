@@ -13,6 +13,10 @@ export const AI_SCOPES: AiScopeMeta[] = [
   { id: "inboxes", label: "Inboxes & sync", desc: "connected accounts and their status" },
   { id: "subscriptions", label: "Subscriptions", desc: "detected recurring charges" },
   { id: "accounts", label: "Accounts", desc: "services tied to your email" },
-  { id: "metadata", label: "Email metadata", desc: "senders, subjects and dates — no message text" },
+  {
+    id: "metadata",
+    label: "Email metadata",
+    desc: "senders, subjects and dates — no message text",
+  },
   { id: "content", label: "Message contents", desc: "snippets and body text, not just metadata" },
 ]

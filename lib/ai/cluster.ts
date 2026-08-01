@@ -146,9 +146,7 @@ export function assignToClusters(
         c.centroid[d] = c.centroid[d] * ((n - 1) / n) + email.vector[d] / n
       }
       c.label =
-        n > 1
-          ? `${c.intent} · ${c.sender} (${n})`
-          : `${c.intent} · ${email.subject ?? c.sender}`
+        n > 1 ? `${c.intent} · ${c.sender} (${n})` : `${c.intent} · ${email.subject ?? c.sender}`
       assignments.push({ emailId: email.id, clusterId: c.id })
     } else {
       const id = `cluster-${Date.now().toString(36)}-${sender}-${email.intent}-${email.id.slice(0, 8)}`

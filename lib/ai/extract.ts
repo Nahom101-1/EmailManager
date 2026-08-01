@@ -18,13 +18,7 @@ export interface ExtractedFields {
   source: "rules" | "llm"
 }
 
-const HIGH_SIGNAL: EmailIntent[] = [
-  "receipt",
-  "renewal",
-  "trial",
-  "security",
-  "action_required",
-]
+const HIGH_SIGNAL: EmailIntent[] = ["receipt", "renewal", "trial", "security", "action_required"]
 
 export function isHighSignal(intent: EmailIntent, uncertain: boolean): boolean {
   return HIGH_SIGNAL.includes(intent) || uncertain

@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+data/
+.claude/
+design_handoff_lifeos/
+package-lock.json
+*.min.js
+*.tsbuildinfo
+next-env.d.ts

@@ -32,9 +32,12 @@ export default async function InboxSyncPage() {
   const stats = getDashboardStats(userId)
   const runs = listSyncRuns(userId)
   const scannedByProvider = countEmailsByProvider(userId)
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-  const newThisWeek = countEmailsSince(weekAgo, userId)
-  const syncTargets = providers.filter((p) => p.status !== "error").map((p) => ({ id: p.id, email: p.email }))
+  const weekAgo = new Date()
+  weekAgo.setUTCDate(weekAgo.getUTCDate() - 7)
+  const newThisWeek = countEmailsSince(weekAgo.toISOString(), userId)
+  const syncTargets = providers
+    .filter((p) => p.status !== "error")
+    .map((p) => ({ id: p.id, email: p.email }))
   const overview = getOverviewStats(userId)
   const historyIncomplete = providers.some((p) => !p.history_complete)
 
@@ -47,7 +50,11 @@ export default async function InboxSyncPage() {
 
   const grouped: Array<{ date: string; items: LocalSyncRun[] }> = []
   for (const run of runs) {
-    const date = new Date(run.started_at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })
+    const date = new Date(run.started_at).toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    })
     const bucket = grouped.find((g) => g.date === date)
     if (bucket) bucket.items.push(run)
     else grouped.push({ date, items: [run] })
@@ -59,7 +66,9 @@ export default async function InboxSyncPage() {
         <div>
           <div className="page-eyebrow">Inbox Sync</div>
           <h1 className="page-title">Sync activity</h1>
-          <p className="page-sub">Every scan, token refresh, and detection run across your connected inboxes.</p>
+          <p className="page-sub">
+            Every scan, token refresh, and detection run across your connected inboxes.
+          </p>
         </div>
         <SyncAllButton targets={syncTargets} variant="primary">
           {historyIncomplete ? "Continue sync" : "Sync all"}
@@ -69,22 +78,35 @@ export default async function InboxSyncPage() {
       <div className="grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 18 }}>
         {statCards.map((s) => (
           <Card key={s.l} className="stat">
-            <span className="label"><Icon name={s.ic} size={13} />{s.l}</span>
-            <span className="val" style={{ fontSize: 22 }}>{s.v}</span>
+            <span className="label">
+              <Icon name={s.ic} size={13} />
+              {s.l}
+            </span>
+            <span className="val" style={{ fontSize: 22 }}>
+              {s.v}
+            </span>
           </Card>
         ))}
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1.4fr", alignItems: "start" }}>
         <Card>
-          <div className="card-head"><h3>Inboxes</h3></div>
+          <div className="card-head">
+            <h3>Inboxes</h3>
+          </div>
           {providers.length === 0 ? (
             <div className="empty">
-              <span className="ico"><Icon name="mail" size={20} /></span>
+              <span className="ico">
+                <Icon name="mail" size={20} />
+              </span>
               <h4>No inboxes connected</h4>
               <p>Connect an inbox to start scanning for subscriptions and accounts.</p>
               <div className="btn-row mt14" style={{ justifyContent: "center" }}>
-                <Link href="/connect"><Btn variant="primary" icon="connect">Connect inbox</Btn></Link>
+                <Link href="/connect">
+                  <Btn variant="primary" icon="connect">
+                    Connect inbox
+                  </Btn>
+                </Link>
               </div>
             </div>
           ) : (
@@ -95,18 +117,29 @@ export default async function InboxSyncPage() {
                   <div key={ib.id} className="list-row">
                     <Provider provider={ib.type} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="center gap8"><span className="row-title ellip" style={{ fontSize: 12.5 }}>{ib.email}</span><StatusBadge status={ib.status} pulse={syncing} /></div>
+                      <div className="center gap8">
+                        <span className="row-title ellip" style={{ fontSize: 12.5 }}>
+                          {ib.email}
+                        </span>
+                        <StatusBadge status={ib.status} pulse={syncing} />
+                      </div>
                       <div className="row-sub mono">
                         {(scannedByProvider[ib.id] ?? 0).toLocaleString()} stored ·{" "}
                         {ib.history_complete
                           ? "history complete"
                           : `${ib.history_synced_count.toLocaleString()}/${ib.history_target.toLocaleString()} crawl`}
                         {" · "}
-                        {ib.last_sync_at ? new Date(ib.last_sync_at).toLocaleDateString() : "never synced"}
+                        {ib.last_sync_at
+                          ? new Date(ib.last_sync_at).toLocaleDateString()
+                          : "never synced"}
                       </div>
                     </div>
                     {ib.status === "error" ? (
-                      <Link href="/connect"><Btn size="xs" variant="danger" icon="alert">Fix</Btn></Link>
+                      <Link href="/connect">
+                        <Btn size="xs" variant="danger" icon="alert">
+                          Fix
+                        </Btn>
+                      </Link>
                     ) : (
                       <SyncButton
                         target={{ id: ib.id, email: ib.email }}
@@ -121,21 +154,53 @@ export default async function InboxSyncPage() {
         </Card>
 
         <Card>
-          <div className="card-head"><h3>Activity log</h3><span className="sub">Most recent first</span></div>
+          <div className="card-head">
+            <h3>Activity log</h3>
+            <span className="sub">Most recent first</span>
+          </div>
           <div className="card-pad">
             {grouped.length === 0 ? (
-              <p className="muted" style={{ fontSize: 12.5 }}>No sync activity yet. Run a sync to see it logged here.</p>
+              <p className="muted" style={{ fontSize: 12.5 }}>
+                No sync activity yet. Run a sync to see it logged here.
+              </p>
             ) : (
               grouped.map((group) => (
                 <div key={group.date} style={{ marginBottom: 14 }}>
-                  <div className="section-label" style={{ margin: "0 0 8px" }}>{group.date}</div>
+                  <div className="section-label" style={{ margin: "0 0 8px" }}>
+                    {group.date}
+                  </div>
                   <div className="timeline">
                     {group.items.map((run) => (
-                      <div key={run.id} className={"tl-item" + (run.status === "success" ? " acc" : "")}>
-                        <span className="tl-dot" style={run.status === "error" ? { borderColor: "var(--st-error)", background: "var(--st-error)" } : {}} />
-                        <div className="tl-time">{new Date(run.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                        <div className="tl-title">{runTitle(run)} <span className="mono faint" style={{ fontWeight: 400, fontSize: 11 }}>· {run.provider_name ?? run.provider_email}</span></div>
-                        <div className="tl-desc" style={run.error ? { color: "var(--st-error)" } : {}}>{runDesc(run)}</div>
+                      <div
+                        key={run.id}
+                        className={"tl-item" + (run.status === "success" ? " acc" : "")}
+                      >
+                        <span
+                          className="tl-dot"
+                          style={
+                            run.status === "error"
+                              ? { borderColor: "var(--st-error)", background: "var(--st-error)" }
+                              : {}
+                          }
+                        />
+                        <div className="tl-time">
+                          {new Date(run.started_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </div>
+                        <div className="tl-title">
+                          {runTitle(run)}{" "}
+                          <span className="mono faint" style={{ fontWeight: 400, fontSize: 11 }}>
+                            · {run.provider_name ?? run.provider_email}
+                          </span>
+                        </div>
+                        <div
+                          className="tl-desc"
+                          style={run.error ? { color: "var(--st-error)" } : {}}
+                        >
+                          {runDesc(run)}
+                        </div>
                       </div>
                     ))}
                   </div>

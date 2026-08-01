@@ -62,52 +62,85 @@ export function BriefingPanel({ height }: Props) {
     return (
       <Box flexDirection="column" padding={1}>
         <Text color="red">Error: {error}</Text>
-        <Text color="gray" dimColor>Run a sync from the web app first.</Text>
+        <Text color="gray" dimColor>
+          Run a sync from the web app first.
+        </Text>
       </Box>
     )
   }
 
   if (!briefing) {
-    return <Box padding={1}><Text color="gray">Loading…</Text></Box>
+    return (
+      <Box padding={1}>
+        <Text color="gray">Loading…</Text>
+      </Box>
+    )
   }
 
   const maxItems = Math.floor((height - 12) / 3)
 
   return (
     <Box flexDirection="column" padding={1} overflow="hidden">
-      <Text bold color="yellow">▸ Needs attention ({briefing.needsReply})</Text>
+      <Text bold color="yellow">
+        ▸ Needs attention ({briefing.needsReply})
+      </Text>
       {briefing.dealFirst.slice(0, Math.max(1, maxItems)).map((item, i) => (
         <Box key={i} flexDirection="column" marginTop={1}>
-          <Text color="white" wrap="truncate">{"  "}● {item.t}</Text>
-          <Text color="gray" dimColor wrap="truncate">{"    "}{item.meta}</Text>
+          <Text color="white" wrap="truncate">
+            {"  "}● {item.t}
+          </Text>
+          <Text color="gray" dimColor wrap="truncate">
+            {"    "}
+            {item.meta}
+          </Text>
         </Box>
       ))}
       {briefing.dealFirst.length === 0 && (
-        <Text color="gray" dimColor>{"  "}All clear.</Text>
+        <Text color="gray" dimColor>
+          {"  "}All clear.
+        </Text>
       )}
 
       <Box marginTop={1} />
-      <Text bold color="blue">▸ Active subscriptions</Text>
+      <Text bold color="blue">
+        ▸ Active subscriptions
+      </Text>
       {subs.slice(0, Math.max(1, maxItems)).map((s, i) => (
         <Box key={i} marginTop={1}>
-          <Text color="white" wrap="truncate">{"  "}{s.company}</Text>
+          <Text color="white" wrap="truncate">
+            {"  "}
+            {s.company}
+          </Text>
           {s.amount != null && (
-            <Text color="gray"> ${s.amount}/{s.billing_cycle === "yearly" ? "yr" : "mo"}</Text>
+            <Text color="gray">
+              {" "}
+              ${s.amount}/{s.billing_cycle === "yearly" ? "yr" : "mo"}
+            </Text>
           )}
         </Box>
       ))}
-      {subs.length === 0 && <Text color="gray" dimColor>{"  "}No active subscriptions.</Text>}
+      {subs.length === 0 && (
+        <Text color="gray" dimColor>
+          {"  "}No active subscriptions.
+        </Text>
+      )}
 
       {bills.length > 0 && (
         <>
           <Box marginTop={1} />
-          <Text bold color="red">▸ Bills due soon</Text>
+          <Text bold color="red">
+            ▸ Bills due soon
+          </Text>
           {bills.slice(0, 3).map((b, i) => (
             <Box key={i} marginTop={1} flexDirection="column">
-              <Text color="white" wrap="truncate">{"  "}● {b.vendor ?? "Unknown"}</Text>
+              <Text color="white" wrap="truncate">
+                {"  "}● {b.vendor ?? "Unknown"}
+              </Text>
               <Text color="gray" dimColor wrap="truncate">
                 {"    "}
-                {b.amount != null ? `$${b.amount}/${b.billing_cycle === "yearly" ? "yr" : "mo"} ` : ""}
+                {b.amount != null
+                  ? `$${b.amount}/${b.billing_cycle === "yearly" ? "yr" : "mo"} `
+                  : ""}
                 due {b.due_date}
               </Text>
             </Box>

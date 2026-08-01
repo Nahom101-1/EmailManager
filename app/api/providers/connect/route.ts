@@ -22,7 +22,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  const { email: rawEmail, username: rawUsername, password, host, port, tls, displayName } = parsed.data
+  const {
+    email: rawEmail,
+    username: rawUsername,
+    password,
+    host,
+    port,
+    tls,
+    displayName,
+  } = parsed.data
   const email = rawEmail.trim()
   const username = rawUsername?.trim() || undefined
 

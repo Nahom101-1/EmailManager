@@ -197,21 +197,22 @@ export function getDbPath() {
 
 export function listProviders(userId = LOCAL_USER_ID): LocalProvider[] {
   const providers = getDb()
-    .prepare(`
+    .prepare(
+      `
       select *
       from providers
       where user_id = ?
       order by created_at desc
-    `)
+    `
+    )
     .all(userId) as Array<Omit<LocalProvider, "tls"> & { tls: number | boolean | null }>
 
   return providers.map(normalizeProvider)
 }
 
 export function getProvider(providerId: string): LocalProvider | null {
-  const provider = getDb()
-    .prepare("select * from providers where id = ?")
-    .get(providerId) as (Omit<LocalProvider, "tls"> & { tls: number | boolean | null }) | undefined
+  const provider = getDb().prepare("select * from providers where id = ?").get(providerId) as
+    (Omit<LocalProvider, "tls"> & { tls: number | boolean | null }) | undefined
 
   return provider ? normalizeProvider(provider) : null
 }
@@ -246,7 +247,8 @@ export function createProvider(input: {
   }
 
   getDb()
-    .prepare(`
+    .prepare(
+      `
       insert into providers (
         id, user_id, type, email, username, display_name, host, port, tls,
         encrypted_password, status, last_sync_at, error_message, created_at
@@ -254,7 +256,8 @@ export function createProvider(input: {
         @id, @user_id, @type, @email, @username, @display_name, @host, @port, @tls,
         @encrypted_password, @status, @last_sync_at, @error_message, @created_at
       )
-    `)
+    `
+    )
     .run(provider)
 
   return normalizeProvider(provider)
@@ -267,13 +270,15 @@ export function updateProviderSyncStatus(input: {
   errorMessage?: string | null
 }) {
   getDb()
-    .prepare(`
+    .prepare(
+      `
       update providers
       set status = @status,
           last_sync_at = coalesce(@lastSyncAt, last_sync_at),
           error_message = @errorMessage
       where id = @providerId
-    `)
+    `
+    )
     .run({
       providerId: input.providerId,
       status: input.status,
@@ -292,7 +297,8 @@ export function updateProviderHistoryCursor(input: {
   newestInternalDate?: string | null
 }) {
   getDb()
-    .prepare(`
+    .prepare(
+      `
       update providers
       set history_page_token = @historyPageToken,
           history_synced_count = @historySyncedCount,
@@ -306,7 +312,8 @@ export function updateProviderHistoryCursor(input: {
             else newest_internal_date
           end
       where id = @providerId
-    `)
+    `
+    )
     .run({
       providerId: input.providerId,
       historyPageToken: input.historyPageToken,
@@ -377,14 +384,17 @@ export function upsertGoogleProvider(input: {
 }) {
   const userId = input.userId ?? LOCAL_USER_ID
   const existing = getDb()
-    .prepare(`
+    .prepare(
+      `
       select p.*
       from providers p
       join google_accounts g on g.provider_id = p.id
       where p.user_id = ? and g.email = ?
       limit 1
-    `)
-    .get(userId, input.email) as (Omit<LocalProvider, "tls"> & { tls: number | boolean | null }) | undefined
+    `
+    )
+    .get(userId, input.email) as
+    (Omit<LocalProvider, "tls"> & { tls: number | boolean | null }) | undefined
 
   const now = new Date().toISOString()
   const provider = existing
@@ -400,16 +410,19 @@ export function upsertGoogleProvider(input: {
 
   if (existing) {
     getDb()
-      .prepare(`
+      .prepare(
+        `
         update providers
         set display_name = ?, status = 'active', error_message = null
         where id = ?
-      `)
+      `
+      )
       .run(input.displayName ?? input.email, provider.id)
   }
 
   getDb()
-    .prepare(`
+    .prepare(
+      `
       insert into google_accounts (
         provider_id, google_account_id, email, scope, encrypted_access_token,
         encrypted_refresh_token, expires_at, updated_at
@@ -425,7 +438,8 @@ export function upsertGoogleProvider(input: {
         encrypted_refresh_token = coalesce(excluded.encrypted_refresh_token, google_accounts.encrypted_refresh_token),
         expires_at = excluded.expires_at,
         updated_at = excluded.updated_at
-    `)
+    `
+    )
     .run({
       providerId: provider.id,
       googleAccountId: input.googleAccountId ?? null,
@@ -454,12 +468,19 @@ export function updateGoogleAccessToken(input: {
   expiresAt?: string
 }) {
   getDb()
-    .prepare(`
+    .prepare(
+      `
       update google_accounts
       set encrypted_access_token = ?, expires_at = ?, updated_at = ?
       where provider_id = ?
-    `)
-    .run(input.encryptedAccessToken, input.expiresAt ?? null, new Date().toISOString(), input.providerId)
+    `
+    )
+    .run(
+      input.encryptedAccessToken,
+      input.expiresAt ?? null,
+      new Date().toISOString(),
+      input.providerId
+    )
 }
 
 /* ------------------------------------------------------------------ */
@@ -502,7 +523,8 @@ export function upsertGmailMessages(messages: GmailMessageInput[]): {
   let updated = 0
   const write = getDb().transaction((items: GmailMessageInput[]) => {
     for (const item of items) {
-      const existing = existsStmt.get(item.providerId, item.gmailMessageId) as { id: string } | undefined
+      const existing = existsStmt.get(item.providerId, item.gmailMessageId) as
+        { id: string } | undefined
       statement.run({
         id: randomUUID(),
         providerId: item.providerId,
@@ -534,11 +556,13 @@ export function getEmailIdMap(providerId: string, gmailMessageIds: string[]): Ma
 
   const placeholders = gmailMessageIds.map(() => "?").join(",")
   const rows = getDb()
-    .prepare(`
+    .prepare(
+      `
       select id, gmail_message_id
       from emails
       where provider_id = ? and gmail_message_id in (${placeholders})
-    `)
+    `
+    )
     .all(providerId, ...gmailMessageIds) as Array<{ id: string; gmail_message_id: string }>
 
   for (const row of rows) {
@@ -549,15 +573,16 @@ export function getEmailIdMap(providerId: string, gmailMessageIds: string[]): Ma
 
 export function getEmailById(emailId: string): LocalEmail | null {
   const row = getDb()
-    .prepare(`
+    .prepare(
+      `
       select e.*, p.email as provider_email, p.display_name as provider_name
       from emails e
       left join providers p on p.id = e.provider_id
       where e.id = ?
-    `)
+    `
+    )
     .get(emailId) as
-    | (Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string })
-    | undefined
+    (Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }) | undefined
 
   if (!row) return null
 
@@ -574,7 +599,8 @@ export function getEmailById(emailId: string): LocalEmail | null {
 
 export function listSubscriptions(userId = LOCAL_USER_ID): LocalSubscription[] {
   return getDb()
-    .prepare(`
+    .prepare(
+      `
       select
         s.*,
         p.email as provider_email,
@@ -595,7 +621,8 @@ export function listSubscriptions(userId = LOCAL_USER_ID): LocalSubscription[] {
         end,
         s.confidence desc,
         coalesce(s.last_seen, s.first_seen) desc
-    `)
+    `
+    )
     .all(userId) as LocalSubscription[]
 }
 
@@ -709,7 +736,8 @@ export function upsertDetectedSubscriptions(input: {
 
 export function listAccounts(userId = LOCAL_USER_ID): LocalAccount[] {
   return getDb()
-    .prepare(`
+    .prepare(
+      `
       select
         a.*,
         p.email as provider_email,
@@ -730,13 +758,15 @@ export function listAccounts(userId = LOCAL_USER_ID): LocalAccount[] {
         end,
         a.confidence desc,
         coalesce(a.last_seen, a.first_seen) desc
-    `)
+    `
+    )
     .all(userId) as LocalAccount[]
 }
 
 export function getAccountById(accountId: string, userId = LOCAL_USER_ID): LocalAccount | null {
   const row = getDb()
-    .prepare(`
+    .prepare(
+      `
       select
         a.*,
         p.email as provider_email,
@@ -747,17 +777,14 @@ export function getAccountById(accountId: string, userId = LOCAL_USER_ID): Local
       left join providers p on p.id = a.provider_id
       left join emails e on e.id = a.source_email_id
       where a.id = ? and a.user_id = ?
-    `)
+    `
+    )
     .get(accountId, userId) as LocalAccount | undefined
 
   return row ?? null
 }
 
-export function updateAccountStatus(input: {
-  id: string
-  userId?: string
-  status: AccountStatus
-}) {
+export function updateAccountStatus(input: { id: string; userId?: string; status: AccountStatus }) {
   getDb()
     .prepare("update accounts set status = ? where id = ? and user_id = ?")
     .run(input.status, input.id, input.userId ?? LOCAL_USER_ID)
@@ -828,10 +855,12 @@ export function hasRunningSyncRun(providerId: string): boolean {
 export function createSyncRun(providerId: string): string {
   const id = randomUUID()
   getDb()
-    .prepare(`
+    .prepare(
+      `
       insert into sync_runs (id, provider_id, status, started_at)
       values (?, ?, 'running', ?)
-    `)
+    `
+    )
     .run(id, providerId, new Date().toISOString())
   return id
 }
@@ -846,7 +875,8 @@ export function finishSyncRun(input: {
   error?: string | null
 }) {
   getDb()
-    .prepare(`
+    .prepare(
+      `
       update sync_runs set
         status = @status,
         finished_at = @finishedAt,
@@ -856,7 +886,8 @@ export function finishSyncRun(input: {
         accounts_detected = @accountsDetected,
         error = @error
       where id = @id
-    `)
+    `
+    )
     .run({
       id: input.id,
       status: input.status,
@@ -871,14 +902,16 @@ export function finishSyncRun(input: {
 
 export function listSyncRuns(userId = LOCAL_USER_ID, limit = 50): LocalSyncRun[] {
   return getDb()
-    .prepare(`
+    .prepare(
+      `
       select r.*, p.email as provider_email, p.display_name as provider_name
       from sync_runs r
       join providers p on p.id = r.provider_id
       where p.user_id = ?
       order by r.started_at desc
       limit ?
-    `)
+    `
+    )
     .all(userId, limit) as LocalSyncRun[]
 }
 
@@ -888,17 +921,18 @@ export function listSyncRuns(userId = LOCAL_USER_ID, limit = 50): LocalSyncRun[]
 
 export function getSetting(key: string): string | null {
   const row = getDb().prepare("select value from settings where key = ?").get(key) as
-    | { value: string }
-    | undefined
+    { value: string } | undefined
   return row?.value ?? null
 }
 
 export function setSetting(key: string, value: string) {
   getDb()
-    .prepare(`
+    .prepare(
+      `
       insert into settings (key, value, updated_at) values (?, ?, ?)
       on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at
-    `)
+    `
+    )
     .run(key, value, new Date().toISOString())
 }
 
@@ -954,25 +988,31 @@ export function setAccountNote(accountId: string, note: string) {
 /* ------------------------------------------------------------------ */
 
 export function countEmailsSince(sinceIso: string, userId = LOCAL_USER_ID): number {
-  return (getDb()
-    .prepare(`
+  return (
+    getDb()
+      .prepare(
+        `
       select count(*) as count
       from emails e
       join providers p on p.id = e.provider_id
       where p.user_id = ? and coalesce(e.date, e.created_at) >= ?
-    `)
-    .get(userId, sinceIso) as { count: number }).count
+    `
+      )
+      .get(userId, sinceIso) as { count: number }
+  ).count
 }
 
 export function countEmailsByProvider(userId = LOCAL_USER_ID): Record<string, number> {
   const rows = getDb()
-    .prepare(`
+    .prepare(
+      `
       select e.provider_id as provider_id, count(*) as count
       from emails e
       join providers p on p.id = e.provider_id
       where p.user_id = ?
       group by e.provider_id
-    `)
+    `
+    )
     .all(userId) as Array<{ provider_id: string; count: number }>
 
   const map: Record<string, number> = {}
@@ -990,55 +1030,72 @@ export interface RecentEmail {
 
 export function listRecentEmails(limit = 25, userId = LOCAL_USER_ID): RecentEmail[] {
   return getDb()
-    .prepare(`
+    .prepare(
+      `
       select e.from_address, e.subject, e.date, e.snippet, p.email as provider_email
       from emails e
       join providers p on p.id = e.provider_id
       where p.user_id = ?
       order by coalesce(e.date, e.created_at) desc
       limit ?
-    `)
+    `
+    )
     .all(userId, limit) as RecentEmail[]
 }
 
 export function getDashboardStats(userId = LOCAL_USER_ID): DashboardStats {
-  const providerCount = (getDb()
-    .prepare("select count(*) as count from providers where user_id = ?")
-    .get(userId) as { count: number }).count
+  const providerCount = (
+    getDb().prepare("select count(*) as count from providers where user_id = ?").get(userId) as {
+      count: number
+    }
+  ).count
 
-  const emailCount = (getDb()
-    .prepare(`
+  const emailCount = (
+    getDb()
+      .prepare(
+        `
       select count(*) as count
       from emails e
       join providers p on p.id = e.provider_id
       where p.user_id = ?
-    `)
-    .get(userId) as { count: number }).count
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
 
-  const subscriptionCount = (getDb()
-    .prepare("select count(*) as count from subscriptions where user_id = ?")
-    .get(userId) as { count: number }).count
+  const subscriptionCount = (
+    getDb()
+      .prepare("select count(*) as count from subscriptions where user_id = ?")
+      .get(userId) as { count: number }
+  ).count
 
-  const accountCount = (getDb()
-    .prepare("select count(*) as count from accounts where user_id = ?")
-    .get(userId) as { count: number }).count
+  const accountCount = (
+    getDb().prepare("select count(*) as count from accounts where user_id = ?").get(userId) as {
+      count: number
+    }
+  ).count
 
   const lastSync = getDb()
     .prepare("select max(last_sync_at) as last from providers where user_id = ?")
     .get(userId) as { last: string | null }
 
-  const syncing = (getDb()
-    .prepare("select count(*) as count from providers where user_id = ? and status = 'syncing'")
-    .get(userId) as { count: number }).count > 0
+  const syncing =
+    (
+      getDb()
+        .prepare("select count(*) as count from providers where user_id = ? and status = 'syncing'")
+        .get(userId) as { count: number }
+    ).count > 0
 
   const lastErrorRow = getDb()
-    .prepare(`
+    .prepare(
+      `
       select error_message
       from providers
       where user_id = ? and status = 'error' and error_message is not null
       order by created_at desc
       limit 1
-    `)
+    `
+    )
     .get(userId) as { error_message: string | null } | undefined
 
   return {
@@ -1392,7 +1449,9 @@ function ensureColumns(
 // Older local databases had subscription rows without detection metadata and
 // with a narrower status CHECK constraint. Rebuild to the current shape.
 function migrateSubscriptionsTable(database: Database.Database) {
-  const columns = database.prepare("pragma table_info(subscriptions)").all() as Array<{ name: string }>
+  const columns = database.prepare("pragma table_info(subscriptions)").all() as Array<{
+    name: string
+  }>
   const names = new Set(columns.map((column) => column.name))
   const schema = database
     .prepare("select sql from sqlite_master where type = 'table' and name = 'subscriptions'")

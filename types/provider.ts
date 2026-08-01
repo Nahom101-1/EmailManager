@@ -38,7 +38,7 @@ export interface ImapConfig {
   port: number
   tls: boolean
   email: string
-  username?: string  // overrides email as IMAP login (e.g. Domeneshop uses mailbox username)
+  username?: string // overrides email as IMAP login (e.g. Domeneshop uses mailbox username)
   password: string
 }
 

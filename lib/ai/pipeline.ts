@@ -3,17 +3,9 @@
  * embed (batched) → intent → extract → incremental cluster → FTS → overview rollups.
  */
 
-import {
-  emailEmbedText,
-  embedTexts,
-  EMBEDDING_DIMS,
-} from "@/lib/ai/embeddings"
+import { emailEmbedText, embedTexts, EMBEDDING_DIMS } from "@/lib/ai/embeddings"
 import { classifyIntent, warmIntentPrototypes } from "@/lib/ai/intent"
-import {
-  assignToClusters,
-  clusterToEmailCluster,
-  type ClusterableEmail,
-} from "@/lib/ai/cluster"
+import { assignToClusters, clusterToEmailCluster, type ClusterableEmail } from "@/lib/ai/cluster"
 import { extractFields, isHighSignal } from "@/lib/ai/extract"
 import { invalidateEmbeddingCache } from "@/lib/ai/vector-cache"
 import { getAiSettings, getGoogleAccount, getLocalUserId } from "@/lib/db/local"

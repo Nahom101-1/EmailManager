@@ -21,7 +21,10 @@ export function ChatPanel({ messages, loading, height }: Props) {
       lines.push({ text: msg.streaming ? "▋" : "…", color: "gray" })
     } else {
       for (const p of paragraphs) {
-        lines.push({ text: "  " + p + (msg.streaming && p === paragraphs[paragraphs.length - 1] ? "▋" : ""), color: isUser ? "white" : "gray" })
+        lines.push({
+          text: "  " + p + (msg.streaming && p === paragraphs[paragraphs.length - 1] ? "▋" : ""),
+          color: isUser ? "white" : "gray",
+        })
       }
     }
     lines.push({ text: "", color: "gray" })
@@ -33,17 +36,28 @@ export function ChatPanel({ messages, loading, height }: Props) {
     <Box flexDirection="column" padding={1} overflow="hidden">
       {messages.length === 0 && !loading && (
         <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
-          <Text color="gray" dimColor>Ask anything about your inbox</Text>
-          <Text color="gray" dimColor>briefing · search · subscriptions · bills</Text>
+          <Text color="gray" dimColor>
+            Ask anything about your inbox
+          </Text>
+          <Text color="gray" dimColor>
+            briefing · search · subscriptions · bills
+          </Text>
         </Box>
       )}
       {visible.map((line, i) => (
-        <Text key={i} color={line.color as Parameters<typeof Text>[0]["color"]} bold={line.bold} wrap="truncate">
+        <Text
+          key={i}
+          color={line.color as Parameters<typeof Text>[0]["color"]}
+          bold={line.bold}
+          wrap="truncate"
+        >
           {line.text}
         </Text>
       ))}
       {loading && messages[messages.length - 1]?.role !== "ai" && (
-        <Text color="gray" dimColor>LifeOS is thinking…</Text>
+        <Text color="gray" dimColor>
+          LifeOS is thinking…
+        </Text>
       )}
     </Box>
   )

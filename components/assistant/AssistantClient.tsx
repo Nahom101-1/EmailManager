@@ -52,9 +52,16 @@ export function AssistantClient({
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [msgs, busy])
 
-  async function persistAi(next: { cloudAiEnabled?: boolean; scopes?: Partial<Record<AiScopeId, boolean>> }) {
+  async function persistAi(next: {
+    cloudAiEnabled?: boolean
+    scopes?: Partial<Record<AiScopeId, boolean>>
+  }) {
     try {
-      await fetch("/api/settings/ai", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) })
+      await fetch("/api/settings/ai", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      })
     } catch {
       /* local-first: ignore */
     }
@@ -76,7 +83,10 @@ export function AssistantClient({
     const q = (text ?? input).trim()
     if (!q || busy) return
     setInput("")
-    const history = msgs.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }))
+    const history = msgs.map((m) => ({
+      role: m.role === "ai" ? "assistant" : "user",
+      content: m.text,
+    }))
     setMsgs((m) => [...m, { role: "user", text: q }])
     setBusy(true)
     // Add placeholder AI message so the bubble appears immediately
@@ -93,7 +103,10 @@ export function AssistantClient({
       const ct = res.headers.get("content-type") ?? ""
       if (ct.includes("application/json")) {
         const data = await res.json()
-        setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: data.text ?? "Something went wrong." }])
+        setMsgs((m) => [
+          ...m.slice(0, -1),
+          { role: "ai", text: data.text ?? "Something went wrong." },
+        ])
         return
       }
 
@@ -115,11 +128,17 @@ export function AssistantClient({
             if (evt.type === "delta" && evt.text) {
               setMsgs((m) => {
                 const copy = [...m]
-                copy[copy.length - 1] = { role: "ai", text: (copy[copy.length - 1]?.text ?? "") + evt.text }
+                copy[copy.length - 1] = {
+                  role: "ai",
+                  text: (copy[copy.length - 1]?.text ?? "") + evt.text,
+                }
                 return copy
               })
             } else if (evt.type === "error") {
-              setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: evt.text ?? "Something went wrong." }])
+              setMsgs((m) => [
+                ...m.slice(0, -1),
+                { role: "ai", text: evt.text ?? "Something went wrong." },
+              ])
             }
             // "done" and "progress" events: no action needed
           } catch {
@@ -128,7 +147,10 @@ export function AssistantClient({
         }
       }
     } catch {
-      setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: "I couldn't reach the assistant just now. Try again." }])
+      setMsgs((m) => [
+        ...m.slice(0, -1),
+        { role: "ai", text: "I couldn't reach the assistant just now. Try again." },
+      ])
     } finally {
       setBusy(false)
     }
@@ -187,7 +209,9 @@ export function AssistantClient({
         <div>
           <div className="page-eyebrow">Assistant</div>
           <h1 className="page-title">Your briefing</h1>
-          <p className="page-sub">A direct read on your digital life — what needs you, what can wait, what to ignore.</p>
+          <p className="page-sub">
+            A direct read on your digital life — what needs you, what can wait, what to ignore.
+          </p>
         </div>
         <AccessControl
           scopeMeta={scopeMeta}
@@ -202,55 +226,154 @@ export function AssistantClient({
       <div className="grid" style={{ gridTemplateColumns: "1.15fr 1fr", alignItems: "start" }}>
         {/* briefing column */}
         <div className="grid" style={{ gap: "var(--gap)" }}>
-          <Card className="card-pad" style={{ borderColor: "color-mix(in oklab, var(--accent) 22%, var(--border))" }}>
+          <Card
+            className="card-pad"
+            style={{ borderColor: "color-mix(in oklab, var(--accent) 22%, var(--border))" }}
+          >
             <div className="between">
-              <div className="center gap8"><Icon name="bolt" size={15} style={{ color: "var(--accent)" }} /><span style={{ fontWeight: 700, fontSize: 14 }}>{greeting}</span></div>
-              <Btn variant="ghost" size="xs" icon={briefBusy ? undefined : "refresh"} disabled={briefBusy} onClick={regenerate}>{briefBusy ? "Thinking…" : "Regenerate"}</Btn>
+              <div className="center gap8">
+                <Icon name="bolt" size={15} style={{ color: "var(--accent)" }} />
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{greeting}</span>
+              </div>
+              <Btn
+                variant="ghost"
+                size="xs"
+                icon={briefBusy ? undefined : "refresh"}
+                disabled={briefBusy}
+                onClick={regenerate}
+              >
+                {briefBusy ? "Thinking…" : "Regenerate"}
+              </Btn>
             </div>
-            <p style={{ marginTop: 11, fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>{summary}</p>
+            <p style={{ marginTop: 11, fontSize: 13.5, lineHeight: 1.6, color: "var(--ink-2)" }}>
+              {summary}
+            </p>
             <div className="center gap6 wrap mt14">
-              <span className="chip" style={{ height: 24 }}><Icon name="mail" size={12} />{briefing.newSinceLast} new</span>
-              <span className="chip" style={{ height: 24 }}><Icon name="flag" size={12} />{briefing.needsReply} need review</span>
-              <span className="chip" style={{ height: 24 }}><Icon name="bolt" size={12} />{briefing.inboxLoad} load</span>
+              <span className="chip" style={{ height: 24 }}>
+                <Icon name="mail" size={12} />
+                {briefing.newSinceLast} new
+              </span>
+              <span className="chip" style={{ height: 24 }}>
+                <Icon name="flag" size={12} />
+                {briefing.needsReply} need review
+              </span>
+              <span className="chip" style={{ height: 24 }}>
+                <Icon name="bolt" size={12} />
+                {briefing.inboxLoad} load
+              </span>
             </div>
           </Card>
 
           <BriefColumn title="Deal with first" tone="warn" icon="flag" items={briefing.dealFirst} />
           <BriefColumn title="Can wait" tone="sync" icon="clock" items={briefing.canWait} />
-          <BriefColumn title="Safe to ignore" tone="idle" icon="archive" items={briefing.ignore} muted />
+          <BriefColumn
+            title="Safe to ignore"
+            tone="idle"
+            icon="archive"
+            items={briefing.ignore}
+            muted
+          />
         </div>
 
         {/* chat column */}
-        <Card style={{ display: "flex", flexDirection: "column", height: 620, position: "sticky", top: 0, overflow: "hidden" }}>
+        <Card
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: 620,
+            position: "sticky",
+            top: 0,
+            overflow: "hidden",
+          }}
+        >
           <div className="card-head">
-            <h3 className="center gap8"><Icon name="bolt" size={14} style={{ color: "var(--accent)" }} />Ask LifeOS</h3>
-            <span className={"badge " + (live ? "active" : "idle")}><span className="dot" />{live ? "Live" : "Demo"}</span>
+            <h3 className="center gap8">
+              <Icon name="bolt" size={14} style={{ color: "var(--accent)" }} />
+              Ask LifeOS
+            </h3>
+            <span className={"badge " + (live ? "active" : "idle")}>
+              <span className="dot" />
+              {live ? "Live" : "Demo"}
+            </span>
           </div>
-          <div ref={bodyRef} className="scroll" style={{ flex: 1, padding: "16px var(--pad-card)", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            ref={bodyRef}
+            className="scroll"
+            style={{
+              flex: 1,
+              padding: "16px var(--pad-card)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
             {msgs.length === 0 && (
               <div style={{ margin: "auto 0", textAlign: "center", color: "var(--ink-3)" }}>
-                <span className="mono-tile" style={{ margin: "0 auto 12px", width: 40, height: 40, color: "var(--accent)" }}><Icon name="bolt" size={18} /></span>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>Ask about anything in your inbox</div>
-                <div style={{ fontSize: 12, marginTop: 4 }}>Triage, subscriptions, accounts, what to ignore.</div>
+                <span
+                  className="mono-tile"
+                  style={{ margin: "0 auto 12px", width: 40, height: 40, color: "var(--accent)" }}
+                >
+                  <Icon name="bolt" size={18} />
+                </span>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>
+                  Ask about anything in your inbox
+                </div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  Triage, subscriptions, accounts, what to ignore.
+                </div>
               </div>
             )}
-            {msgs.map((m, i) => <Bubble key={i} msg={m} />)}
+            {msgs.map((m, i) => (
+              <Bubble key={i} msg={m} />
+            ))}
             {busy && (
-              <div className="center gap8" style={{ color: "var(--ink-3)", fontSize: 12.5, padding: "2px 4px" }}>
-                <span className="dot pulse" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)" }} />LifeOS is thinking…
+              <div
+                className="center gap8"
+                style={{ color: "var(--ink-3)", fontSize: 12.5, padding: "2px 4px" }}
+              >
+                <span
+                  className="dot pulse"
+                  style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)" }}
+                />
+                LifeOS is thinking…
               </div>
             )}
           </div>
           {msgs.length === 0 && (
             <div className="center gap6 wrap" style={{ padding: "0 var(--pad-card) 10px" }}>
               {suggestedPrompts.slice(0, 4).map((p) => (
-                <button key={p} className="chip btn-chip" style={{ fontSize: 11.5 }} onClick={() => send(p)}>{p}</button>
+                <button
+                  key={p}
+                  className="chip btn-chip"
+                  style={{ fontSize: 11.5 }}
+                  onClick={() => send(p)}
+                >
+                  {p}
+                </button>
               ))}
             </div>
           )}
-          <div style={{ padding: "12px var(--pad-card)", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
-            <input className="input" placeholder="Ask anything about your inbox…" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-            <Btn variant="primary" icon="send" disabled={busy || !input.trim()} onClick={() => send()} />
+          <div
+            style={{
+              padding: "12px var(--pad-card)",
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              gap: 8,
+            }}
+          >
+            <input
+              className="input"
+              placeholder="Ask anything about your inbox…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+            />
+            <Btn
+              variant="primary"
+              icon="send"
+              disabled={busy || !input.trim()}
+              onClick={() => send()}
+            />
           </div>
         </Card>
       </div>
@@ -279,32 +402,65 @@ function AccessControl({
   return (
     <div style={{ position: "relative" }}>
       <button className="btn sm" onClick={() => setOpen((o) => !o)}>
-        <Icon name="shield" size={14} style={{ color: "var(--accent)" }} />Cloud AI · {onCount}/{scopeMeta.length} sources
+        <Icon name="shield" size={14} style={{ color: "var(--accent)" }} />
+        Cloud AI · {onCount}/{scopeMeta.length} sources
         <Icon name="chevD" size={13} />
       </button>
       {open && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 30 }} onClick={() => setOpen(false)} />
-          <div className="card" style={{ position: "absolute", right: 0, top: 40, zIndex: 31, width: 320, boxShadow: "var(--shadow-pop)", overflow: "hidden" }}>
+          <div
+            className="card"
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 40,
+              zIndex: 31,
+              width: 320,
+              boxShadow: "var(--shadow-pop)",
+              overflow: "hidden",
+            }}
+          >
             <div className="card-pad" style={{ borderBottom: "1px solid var(--border)" }}>
-              <div className="center gap8" style={{ fontWeight: 650, fontSize: 13 }}><Icon name="shield" size={15} style={{ color: "var(--accent)" }} />What the assistant can see</div>
-              <p className="row-sub" style={{ marginTop: 5, lineHeight: 1.45 }}>Opt-in. The assistant only reads the sources you enable — processed in the cloud, never stored.</p>
+              <div className="center gap8" style={{ fontWeight: 650, fontSize: 13 }}>
+                <Icon name="shield" size={15} style={{ color: "var(--accent)" }} />
+                What the assistant can see
+              </div>
+              <p className="row-sub" style={{ marginTop: 5, lineHeight: 1.45 }}>
+                Opt-in. The assistant only reads the sources you enable — processed in the cloud,
+                never stored.
+              </p>
             </div>
             <div className="list-row" style={{ padding: "11px 16px" }}>
               <div style={{ flex: 1 }}>
-                <div className="row-title" style={{ fontSize: 12.5 }}>Cloud AI</div>
-                <div className="row-sub">{cloudConfigured ? "Live answers from Claude" : "No API key — Demo answers only"}</div>
+                <div className="row-title" style={{ fontSize: 12.5 }}>
+                  Cloud AI
+                </div>
+                <div className="row-sub">
+                  {cloudConfigured ? "Live answers from Claude" : "No API key — Demo answers only"}
+                </div>
               </div>
               <button className={"switch" + (cloudEnabled ? " on" : "")} onClick={onToggleCloud} />
             </div>
-            <div className="list" style={{ opacity: cloudEnabled ? 1 : 0.55, pointerEvents: cloudEnabled ? "auto" : "none" }}>
+            <div
+              className="list"
+              style={{
+                opacity: cloudEnabled ? 1 : 0.55,
+                pointerEvents: cloudEnabled ? "auto" : "none",
+              }}
+            >
               {scopeMeta.map((s) => (
                 <div key={s.id} className="list-row" style={{ padding: "11px 16px" }}>
                   <div style={{ flex: 1 }}>
-                    <div className="row-title" style={{ fontSize: 12.5 }}>{s.label}</div>
+                    <div className="row-title" style={{ fontSize: 12.5 }}>
+                      {s.label}
+                    </div>
                     <div className="row-sub">{s.desc}</div>
                   </div>
-                  <button className={"switch" + (scopes[s.id] ? " on" : "")} onClick={() => onToggleScope(s.id)} />
+                  <button
+                    className={"switch" + (scopes[s.id] ? " on" : "")}
+                    onClick={() => onToggleScope(s.id)}
+                  />
                 </div>
               ))}
             </div>
@@ -315,24 +471,61 @@ function AccessControl({
   )
 }
 
-function BriefColumn({ title, tone, icon, items, muted }: { title: string; tone: string; icon: string; items: BriefItem[]; muted?: boolean }) {
+function BriefColumn({
+  title,
+  tone,
+  icon,
+  items,
+  muted,
+}: {
+  title: string
+  tone: string
+  icon: string
+  items: BriefItem[]
+  muted?: boolean
+}) {
   return (
     <Card>
       <div className="card-head" style={{ padding: "11px var(--pad-card)" }}>
         <h3 className="center gap8" style={{ fontSize: 12.5 }}>
-          <span className="badge" style={{ background: `var(--st-${tone}-bg)`, color: `var(--st-${tone})`, height: 19 }}><Icon name={icon} size={11} /></span>{title}
+          <span
+            className="badge"
+            style={{ background: `var(--st-${tone}-bg)`, color: `var(--st-${tone})`, height: 19 }}
+          >
+            <Icon name={icon} size={11} />
+          </span>
+          {title}
         </h3>
         <span className="badge idle">{items.length}</span>
       </div>
       {items.length === 0 ? (
-        <div className="card-pad muted" style={{ fontSize: 12 }}>Nothing here right now.</div>
+        <div className="card-pad muted" style={{ fontSize: 12 }}>
+          Nothing here right now.
+        </div>
       ) : (
         <div className="list">
           {items.map((it, i) => (
             <div key={i} className="list-row" style={{ padding: "10px var(--pad-card)" }}>
-              <span style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--border-strong)", flex: "none" }} />
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  border: "2px solid var(--border-strong)",
+                  flex: "none",
+                }}
+              />
               <div style={{ flex: 1 }}>
-                <div className="row-title" style={{ fontSize: 12.5, fontWeight: 550, color: muted ? "var(--ink-2)" : "var(--ink)" }}>{it.t}</div>
+                <div
+                  className="row-title"
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 550,
+                    color: muted ? "var(--ink-2)" : "var(--ink)",
+                  }}
+                >
+                  {it.t}
+                </div>
                 <div className="row-sub mono">{it.meta}</div>
               </div>
             </div>
@@ -360,7 +553,9 @@ function Bubble({ msg }: { msg: ChatMsg }) {
   return (
     <div style={{ display: "flex", justifyContent: ai ? "flex-start" : "flex-end" }}>
       {ai ? (
-        <div className="bubble-md" style={common}><Markdown text={msg.text} /></div>
+        <div className="bubble-md" style={common}>
+          <Markdown text={msg.text} />
+        </div>
       ) : (
         <div style={{ ...common, whiteSpace: "pre-wrap" }}>{msg.text}</div>
       )}
@@ -374,7 +569,13 @@ function Markdown({ text }: { text: string }) {
   let list: string[] = []
   const flush = (key: number) => {
     if (!list.length) return
-    blocks.push(<ul key={`ul-${key}`}>{list.map((li, i) => <li key={i}>{inline(li)}</li>)}</ul>)
+    blocks.push(
+      <ul key={`ul-${key}`}>
+        {list.map((li, i) => (
+          <li key={i}>{inline(li)}</li>
+        ))}
+      </ul>
+    )
     list = []
   }
   lines.forEach((raw, i) => {
@@ -392,7 +593,8 @@ function Markdown({ text }: { text: string }) {
 function inline(s: string): React.ReactNode {
   const parts = s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
   return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) return <strong key={i}>{part.slice(2, -2)}</strong>
+    if (part.startsWith("**") && part.endsWith("**"))
+      return <strong key={i}>{part.slice(2, -2)}</strong>
     if (part.startsWith("`") && part.endsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>
     return <span key={i}>{part}</span>
   })

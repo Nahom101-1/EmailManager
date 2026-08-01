@@ -1,10 +1,14 @@
 // Heuristic, metadata-only detection of subscriptions and online accounts.
 // We never read message bodies — only headers, subject and the Gmail snippet.
+// Paid vs mailing-list kind uses MiniLM/hash prototypes in subscription-kind.
 
 import { learningConfidenceBias } from "@/lib/ai/learning"
+import { classifySubscriptionKind, type SubscriptionKind } from "@/lib/ai/subscription-kind"
 
 export type SubscriptionCategory =
   "saas" | "streaming" | "finance" | "shopping" | "newsletter" | "utilities" | "education" | "other"
+
+export type { SubscriptionKind }
 
 export interface DetectionInput {
   from?: string
@@ -20,6 +24,7 @@ export interface SubscriptionSignal {
   senderEmail: string | null
   senderDomain: string | null
   category: SubscriptionCategory
+  kind: SubscriptionKind
   confidence: number
   reasons: string[]
   amount: number | null
@@ -282,9 +287,12 @@ export function detectSubscription(input: DetectionInput): SubscriptionSignal | 
     }
   }
 
-  if (hasUnsubscribeHeader(input.headers)) {
-    confidence += 0.3
-    reasons.push("Has a List-Unsubscribe header")
+  // List-Unsubscribe is a mailing-list signal, not proof of a paid plan.
+  // Do not boost Money confidence from it alone.
+  const listHeader = hasUnsubscribeHeader(input.headers)
+  if (listHeader && confidence < 0.25) {
+    confidence += 0.35
+    reasons.push("Mailing-list headers (List-Unsubscribe / List-ID)")
   }
 
   if (vendorKey && KNOWN_VENDORS[vendorKey]) {
@@ -299,20 +307,45 @@ export function detectSubscription(input: DetectionInput): SubscriptionSignal | 
     reasons.push(learnBias > 0 ? "Previously confirmed by you" : "Previously ignored by you")
   }
 
-  if (reasons.length === 0 || confidence < 0.3) return null
-
   const amountText = `${input.subject ?? ""} ${input.snippet ?? ""}`
   const { amount, billingCycle } = parseAmount(amountText)
+  let category = categoryFor(senderDomain, haystack)
+
+  const kindResult = classifySubscriptionKind({
+    from: input.from,
+    subject: input.subject,
+    snippet: input.snippet,
+    headers: input.headers,
+    amount,
+    category,
+  })
+  reasons.push(...kindResult.reasons)
+
+  if (kindResult.kind === "mailing_list" && category !== "newsletter") {
+    category = "newsletter"
+  }
+
+  // Require either payment-ish signal, known vendor, or clear mailing-list signal.
+  const hasPaidSignal = confidence >= 0.3 || amount != null
+  const hasListSignal = kindResult.kind === "mailing_list" && (listHeader || confidence >= 0.25)
+  if (!hasPaidSignal && !hasListSignal) return null
+  if (reasons.length === 0) return null
+
+  const blended =
+    kindResult.kind === "paid"
+      ? Math.max(confidence, kindResult.confidence * 0.9)
+      : Math.max(kindResult.confidence, Math.min(confidence, 0.7))
 
   return {
     company,
     senderEmail,
     senderDomain,
-    category: categoryFor(senderDomain, haystack),
-    confidence: clampConfidence(confidence),
+    category,
+    kind: kindResult.kind,
+    confidence: clampConfidence(blended),
     reasons: dedupe(reasons),
-    amount,
-    billingCycle,
+    amount: kindResult.kind === "paid" ? amount : null,
+    billingCycle: kindResult.kind === "paid" ? billingCycle : null,
   }
 }
 

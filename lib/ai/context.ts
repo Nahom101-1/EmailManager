@@ -28,12 +28,7 @@ export interface Briefing {
   ignore: BriefItem[]
 }
 
-// Subscriptions may carry an amount/cycle on the row even though the typed
-// interface omits them (detection rarely fills them). Read them defensively.
-type SubWithAmount = LocalSubscription & {
-  amount?: number | null
-  billing_cycle?: string | null
-}
+type SubWithAmount = LocalSubscription
 
 function monthlyAmount(sub: SubWithAmount): number {
   if (sub.amount == null) return 0
@@ -87,12 +82,17 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
 
   if (on("subscriptions")) {
     const subs = listSubscriptions(userId) as SubWithAmount[]
-    const active = subs.filter((s) => s.status === "active")
-    const review = subs.filter((s) => s.status === "unknown")
+    const isPaid = (s: SubWithAmount) =>
+      s.kind === "paid" || (s.kind == null && s.category !== "newsletter")
+    const paid = subs.filter(isPaid)
+    const lists = subs.filter((s) => !isPaid(s))
+    const active = paid.filter((s) => s.status === "active")
+    const review = paid.filter((s) => s.status === "unknown")
     const monthly = active.reduce((t, s) => t + monthlyAmount(s), 0)
     lines.push(
-      `Subscriptions: ${subs.length} detected, ${active.length} confirmed active, ${review.length} awaiting review.` +
-        (monthly > 0 ? ` ~$${monthly.toFixed(0)}/mo across confirmed.` : "")
+      `Paid plans: ${paid.length} detected, ${active.length} confirmed active, ${review.length} awaiting review.` +
+        (monthly > 0 ? ` ~$${monthly.toFixed(0)}/mo across confirmed paid plans.` : "") +
+        ` Email mailing lists: ${lists.length} (not counted in monthly spend).`
     )
     if (active.length > 0) {
       const withAmounts = active.filter((s) => s.amount != null).slice(0, 5)

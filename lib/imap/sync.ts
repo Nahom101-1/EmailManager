@@ -110,6 +110,7 @@ export async function syncImapProvider(input: {
           senderEmail: subscription.senderEmail,
           senderDomain: subscription.senderDomain,
           category: subscription.category,
+          kind: subscription.kind,
           confidence: subscription.confidence,
           source: subscription.reasons.join(" · "),
           emailUsed: message.to ?? null,

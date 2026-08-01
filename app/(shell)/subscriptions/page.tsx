@@ -52,8 +52,12 @@ export default async function SubscriptionsPage({
     )
   }
 
-  const active = subs.filter((s) => s.status === "active")
-  const review = subs.filter((s) => s.status === "unknown")
+  const isPaid = (s: (typeof subs)[number]) =>
+    s.kind === "paid" || ((s.kind == null || s.kind === undefined) && s.category !== "newsletter")
+  const paid = subs.filter(isPaid)
+  const lists = subs.filter((s) => !isPaid(s))
+  const active = paid.filter((s) => s.status === "active")
+  const review = paid.filter((s) => s.status === "unknown")
   const monthly = active
     .filter((s) => s.amount != null)
     .reduce(
@@ -78,16 +82,22 @@ export default async function SubscriptionsPage({
         </h1>
         {monthly > 0 && (
           <span style={{ color: "var(--ink-3)", fontSize: 14 }}>
-            ${Math.round(monthly * 12).toLocaleString()}/yr across {active.length} subscription
+            ${Math.round(monthly * 12).toLocaleString()}/yr across {active.length} paid plan
             {active.length !== 1 ? "s" : ""}
+            {lists.length > 0
+              ? ` · ${lists.length} email list${lists.length !== 1 ? "s" : ""}`
+              : ""}
           </span>
         )}
       </div>
+      <p style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: review.length > 0 ? 8 : 28 }}>
+        Paid plans (Netflix-style) are separate from email mailing lists. Defaults to Paid plans.
+      </p>
       {review.length > 0 && (
         <p style={{ fontSize: 13, color: "var(--st-warn)", marginBottom: 28 }}>
           <Icon name="flag" size={12} style={{ marginRight: 5, verticalAlign: "middle" }} />
-          {review.length} subscription{review.length !== 1 ? "s" : ""} need confirmation — amounts
-          may be off until you review them.
+          {review.length} paid plan{review.length !== 1 ? "s" : ""} need confirmation — amounts may
+          be off until you review them.
         </p>
       )}
 

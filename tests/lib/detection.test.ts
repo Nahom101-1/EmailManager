@@ -59,7 +59,7 @@ describe("extractSenderEmail / extractDomain", () => {
 })
 
 describe("detectSubscription", () => {
-  it("detects a known vendor receipt", () => {
+  it("detects a known vendor receipt as a paid plan", () => {
     const result = detectSubscription({
       from: "Netflix <billing@mail.netflix.com>",
       subject: "Your Netflix subscription receipt",
@@ -68,7 +68,21 @@ describe("detectSubscription", () => {
     })
     expect(result).not.toBeNull()
     expect(result?.company).toMatch(/Netflix/i)
+    expect(result?.kind).toBe("paid")
     expect(result?.confidence).toBeGreaterThan(0.5)
+    expect(result?.amount).toBe(15.49)
+  })
+
+  it("classifies newsletter mailing lists separately from paid plans", () => {
+    const result = detectSubscription({
+      from: "TLDR <news@tldr.tech>",
+      subject: "TLDR: AI news digest",
+      snippet: "Thanks for subscribing to our newsletter. Unsubscribe anytime.",
+      headers: { "List-Unsubscribe": "<mailto:unsub@tldr.tech>", "List-ID": "tldr.tech" },
+    })
+    expect(result).not.toBeNull()
+    expect(result?.kind).toBe("mailing_list")
+    expect(result?.amount).toBeNull()
   })
 
   it("ignores unrelated mail", () => {

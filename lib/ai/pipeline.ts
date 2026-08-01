@@ -17,7 +17,11 @@ import { invalidateEmbeddingCache } from "@/lib/ai/vector-cache"
 import { getAiSettings, getGoogleAccount, getLocalUserId } from "@/lib/db/local"
 import { getValidGoogleAccessToken } from "@/lib/google/oauth"
 import { bridgeExtractToSubscription } from "@/lib/ai/bill-bridge"
+import { warmSubscriptionKindPrototypes } from "@/lib/ai/subscription-kind"
 import type { EmailIntent } from "@/lib/ai/intent"
+import { extractSenderEmail, extractDomain } from "@/lib/detection"
+import { upsertDetectedSubscriptions } from "@/lib/db/local"
+import { classifySubscriptionKind } from "@/lib/ai/subscription-kind"
 import {
   countEmailsNeedingIntelligence,
   deleteEmbeddingsNotMatchingModel,
@@ -150,6 +154,7 @@ export async function runEmailIntelligence(input: {
   const allowLlm = settings.cloudAiEnabled && allowContent
 
   void warmIntentPrototypes().catch(() => {})
+  void warmSubscriptionKindPrototypes().catch(() => {})
 
   // Pin one embedding space: purge hash vectors once MiniLM is available (or vice versa).
   const preferredModel = await resolveActiveEmbeddingModel()
@@ -327,8 +332,27 @@ export async function runEmailIntelligence(input: {
         fromAddress: email.from_address,
         toAddress: email.to_address,
         seenAt: email.date,
+        subject: email.subject,
+        snippet: email.snippet,
+        headers,
         intent: intentResult.intent,
         extract,
+        vector,
+      })
+    } else if (intentResult.intent === "newsletter" || intentResult.intent === "promo") {
+      // Promote mailing lists even when field extract is empty (no amount/vendor rules).
+      promoteMailingListFromIntent({
+        providerId: input.providerId,
+        emailId: email.id,
+        fromAddress: email.from_address,
+        toAddress: email.to_address,
+        seenAt: email.date,
+        subject: email.subject,
+        snippet: email.snippet,
+        headers,
+        intent: intentResult.intent,
+        vector,
+        confidence: intentResult.confidence,
       })
     }
 
@@ -363,6 +387,61 @@ export async function runEmailIntelligence(input: {
     clusters: clusterCount,
     backlogRemaining,
   }
+}
+
+function promoteMailingListFromIntent(input: {
+  providerId: string
+  emailId: string
+  fromAddress?: string | null
+  toAddress?: string | null
+  seenAt?: string | null
+  subject?: string | null
+  snippet?: string | null
+  headers?: Record<string, string> | null
+  intent: EmailIntent
+  vector: Float32Array
+  confidence: number
+}) {
+  const kind = classifySubscriptionKind({
+    from: input.fromAddress,
+    subject: input.subject,
+    snippet: input.snippet,
+    headers: input.headers,
+    category: "newsletter",
+    intent: input.intent,
+    vector: input.vector,
+  })
+  if (kind.kind !== "mailing_list") return
+
+  const senderEmail = extractSenderEmail(input.fromAddress ?? undefined)
+  const senderDomain = extractDomain(senderEmail)
+  const display =
+    input.fromAddress?.split("<")[0].replace(/["']/g, "").trim() ||
+    senderDomain?.split(".")[0] ||
+    "Mailing list"
+  const company =
+    display.includes("@") || !display
+      ? (senderDomain?.split(".").slice(-2, -1)[0] ?? "Mailing list")
+      : display
+  const pretty = company.charAt(0).toUpperCase() + company.slice(1)
+
+  upsertDetectedSubscriptions({
+    records: [
+      {
+        providerId: input.providerId,
+        company: pretty,
+        senderEmail,
+        senderDomain,
+        category: "newsletter",
+        kind: "mailing_list",
+        confidence: Math.max(input.confidence, kind.confidence),
+        source: `ai-mailing-list · ${kind.reasons.join(" · ")}`,
+        emailUsed: input.toAddress ?? null,
+        evidenceEmailId: input.emailId,
+        seenAt: input.seenAt ?? new Date().toISOString(),
+      },
+    ],
+  })
 }
 
 function updateClustersIncremental(newlyClassified: ClusterableEmail[]): number {

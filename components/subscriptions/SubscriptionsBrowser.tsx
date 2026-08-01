@@ -4,10 +4,16 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, Conf, Icon, StatusBadge, Tile, fmt, monogram } from "@/components/ui"
 import { useTheme } from "@/components/theme/ThemeProvider"
-import type { LocalSubscription, SubscriptionStatus } from "@/lib/db/local"
+import type { LocalSubscription, SubscriptionKind, SubscriptionStatus } from "@/lib/db/local"
 import type { CompanyGroup, SubscriptionGroupInstance } from "@/lib/identity/groups"
 
 type SubRow = LocalSubscription
+
+const KIND_FILTERS: Array<{ v: "all" | SubscriptionKind; label: string }> = [
+  { v: "all", label: "All types" },
+  { v: "paid", label: "Paid plans" },
+  { v: "mailing_list", label: "Email lists" },
+]
 
 const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
   { v: "all", label: "All" },
@@ -16,6 +22,14 @@ const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
   { v: "cancelled", label: "Cancelled" },
   { v: "ignored", label: "Ignored" },
 ]
+
+function subKind(s: {
+  kind?: SubscriptionKind | null
+  category?: string | null
+}): SubscriptionKind {
+  if (s.kind === "mailing_list" || s.kind === "paid") return s.kind
+  return s.category === "newsletter" ? "mailing_list" : "paid"
+}
 
 const PAGE_SIZE = 100
 
@@ -36,20 +50,31 @@ export function SubscriptionsBrowser({
 }) {
   const router = useRouter()
   const { layout, set } = useTheme()
+  const [kindFilter, setKindFilter] = useState<"all" | SubscriptionKind>("paid")
   const [filter, setFilter] = useState<"all" | SubscriptionStatus>("all")
   const [inbox, setInbox] = useState(initialInbox)
   const [grouped, setGrouped] = useState(inboxes.length >= 2)
   const [pending, setPending] = useState<string | null>(null)
   const [visible, setVisible] = useState(PAGE_SIZE)
 
-  const counts = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const s of subscriptions) m.set(s.status, (m.get(s.status) ?? 0) + 1)
+  const kindCounts = useMemo(() => {
+    const m = { all: subscriptions.length, paid: 0, mailing_list: 0 }
+    for (const s of subscriptions) m[subKind(s)] += 1
     return m
   }, [subscriptions])
 
+  const counts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of subscriptions) {
+      if (kindFilter !== "all" && subKind(s) !== kindFilter) continue
+      m.set(s.status, (m.get(s.status) ?? 0) + 1)
+    }
+    return m
+  }, [subscriptions, kindFilter])
+
   const filtered = useMemo(() => {
     return subscriptions.filter((s) => {
+      if (kindFilter !== "all" && subKind(s) !== kindFilter) return false
       if (filter !== "all" && s.status !== filter) return false
       if (inbox !== "all") {
         const addr = (s.provider_email ?? s.email_used ?? "").toLowerCase()
@@ -57,17 +82,27 @@ export function SubscriptionsBrowser({
       }
       return true
     })
-  }, [subscriptions, filter, inbox])
+  }, [subscriptions, filter, inbox, kindFilter])
 
   const filteredGroups = useMemo(() => {
-    return groups.filter((g) => {
-      if (filter !== "all" && g.status !== filter) return false
-      if (inbox !== "all") {
-        if (!g.inboxes.some((e) => e.toLowerCase() === inbox.toLowerCase())) return false
-      }
-      return true
-    })
-  }, [groups, filter, inbox])
+    return groups
+      .map((g) => ({
+        ...g,
+        instances: g.instances.filter((inst) => {
+          const row = subscriptions.find((s) => s.id === inst.id)
+          if (!row) return true
+          return kindFilter === "all" || subKind(row) === kindFilter
+        }),
+      }))
+      .filter((g) => {
+        if (g.instances.length === 0) return false
+        if (filter !== "all" && g.status !== filter) return false
+        if (inbox !== "all") {
+          if (!g.inboxes.some((e) => e.toLowerCase() === inbox.toLowerCase())) return false
+        }
+        return true
+      })
+  }, [groups, filter, inbox, kindFilter, subscriptions])
 
   const shown = filtered.slice(0, visible)
   const shownGroups = filteredGroups.slice(0, visible)
@@ -88,10 +123,33 @@ export function SubscriptionsBrowser({
 
   return (
     <div>
+      <div className="btn-row mb14" style={{ gap: 7, flexWrap: "wrap" }}>
+        {KIND_FILTERS.map((f) => (
+          <button
+            key={f.v}
+            className={"chip btn-chip" + (kindFilter === f.v ? " on" : "")}
+            onClick={() => {
+              setKindFilter(f.v)
+              setVisible(PAGE_SIZE)
+            }}
+          >
+            {f.label}
+            <span className="num faint" style={{ fontSize: 11 }}>
+              {kindCounts[f.v]}
+            </span>
+          </button>
+        ))}
+      </div>
+
       <div className="between mb14" style={{ alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <div className="btn-row" style={{ gap: 7, flexWrap: "wrap" }}>
           {FILTERS.map((f) => {
-            const count = f.v === "all" ? subscriptions.length : (counts.get(f.v) ?? 0)
+            const count =
+              f.v === "all"
+                ? kindFilter === "all"
+                  ? subscriptions.length
+                  : kindCounts[kindFilter]
+                : (counts.get(f.v) ?? 0)
             return (
               <button
                 key={f.v}
@@ -256,7 +314,9 @@ export function SubscriptionsBrowser({
                     <Tile mono={monogram(s.company)} />
                     <div>
                       <div className="row-title">{s.company}</div>
-                      <div className="row-sub mono">{s.category ?? "recurring"}</div>
+                      <div className="row-sub mono">
+                        {subKind(s) === "mailing_list" ? "Email list" : (s.category ?? "paid plan")}
+                      </div>
                     </div>
                   </div>
                   <SubMenu id={s.id} disabled={pending === s.id} onPatch={patch} />
@@ -264,7 +324,12 @@ export function SubscriptionsBrowser({
 
                 <div className="between" style={{ alignItems: "flex-end" }}>
                   <div>
-                    {s.amount != null ? (
+                    {subKind(s) === "mailing_list" ? (
+                      <span className="chip" style={{ height: 22, fontSize: 11 }}>
+                        <Icon name="mail" size={11} />
+                        Mailing list
+                      </span>
+                    ) : s.amount != null ? (
                       <>
                         <span
                           className="num"

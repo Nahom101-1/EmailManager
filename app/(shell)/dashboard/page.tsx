@@ -69,8 +69,11 @@ export default async function DashboardPage() {
   const actionItems = briefing.dealFirst
     .slice(0, 6)
     .map((i) => ({ title: i.t, meta: i.meta, to: "/subscriptions" }))
-  const activeSubs = subs.filter((s) => s.status === "active")
-  const reviewCount = subs.filter((s) => s.status === "unknown").length
+  const isPaid = (s: SubRow) =>
+    s.kind === "paid" || ((s.kind == null || s.kind === undefined) && s.category !== "newsletter")
+  const paidSubs = subs.filter(isPaid)
+  const activeSubs = paidSubs.filter((s) => s.status === "active")
+  const reviewCount = paidSubs.filter((s) => s.status === "unknown").length
   const monthly = activeSubs
     .filter((s) => s.amount != null)
     .reduce(

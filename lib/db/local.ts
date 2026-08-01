@@ -67,6 +67,7 @@ export interface DashboardStats {
 }
 
 export type SubscriptionStatus = "active" | "cancelled" | "unknown" | "ignored"
+export type SubscriptionKind = "paid" | "mailing_list"
 export type AccountStatus = "active" | "closed" | "unknown" | "ignore"
 
 export interface LocalSubscription {
@@ -77,6 +78,7 @@ export interface LocalSubscription {
   sender_email: string | null
   sender_domain: string | null
   category: string | null
+  kind: SubscriptionKind | null
   confidence: number | null
   source: string | null
   status: SubscriptionStatus
@@ -153,6 +155,7 @@ export interface DetectedSubscriptionRecord {
   senderEmail: string | null
   senderDomain: string | null
   category: string
+  kind?: SubscriptionKind
   confidence: number
   source: string
   emailUsed: string | null
@@ -714,11 +717,11 @@ export function upsertDetectedSubscriptions(input: {
   const statement = getDb().prepare(`
     insert into subscriptions (
       id, user_id, provider_id, company, sender_email, sender_domain,
-      category, confidence, source, status, email_used,
+      category, kind, confidence, source, status, email_used,
       first_seen, last_seen, source_email_id, amount, billing_cycle, due_date, currency
     ) values (
       @id, @userId, @providerId, @company, @senderEmail, @senderDomain,
-      @category, @confidence, @source, 'unknown', @emailUsed,
+      @category, @kind, @confidence, @source, 'unknown', @emailUsed,
       @seenAt, @seenAt, @evidenceEmailId, @amount, @billingCycle, @dueDate, @currency
     )
     on conflict(user_id, provider_id, company) do update set
@@ -727,6 +730,11 @@ export function upsertDetectedSubscriptions(input: {
       confidence = max(coalesce(subscriptions.confidence, 0), excluded.confidence),
       category = case when excluded.confidence >= coalesce(subscriptions.confidence, 0)
                       then excluded.category else subscriptions.category end,
+      kind = case
+        when excluded.kind = 'paid' then 'paid'
+        when subscriptions.kind = 'paid' then 'paid'
+        else coalesce(excluded.kind, subscriptions.kind, 'paid')
+      end,
       source = case when excluded.confidence >= coalesce(subscriptions.confidence, 0)
                     then excluded.source else subscriptions.source end,
       source_email_id = case when excluded.confidence >= coalesce(subscriptions.confidence, 0)
@@ -751,6 +759,7 @@ export function upsertDetectedSubscriptions(input: {
         senderEmail: record.senderEmail,
         senderDomain: record.senderDomain,
         category: record.category,
+        kind: record.kind ?? "paid",
         confidence: record.confidence,
         source: record.source,
         emailUsed: record.emailUsed,
@@ -1262,6 +1271,7 @@ function migrate(database: Database.Database) {
       currency text,
       billing_cycle text,
       due_date text,
+      kind text not null default 'paid' check (kind in ('paid', 'mailing_list')),
       status text not null default 'unknown' check (status in ('active', 'cancelled', 'unknown', 'ignored')),
       email_used text,
       first_seen text,
@@ -1375,7 +1385,18 @@ function migrate(database: Database.Database) {
   migrateEmailIntelligence(database)
   migrateOverviewTables(database)
 
-  ensureColumns(database, "subscriptions", [["due_date", "text"]])
+  ensureColumns(database, "subscriptions", [
+    ["due_date", "text"],
+    ["kind", "text not null default 'paid'"],
+  ])
+  // Backfill: newsletter category rows were mailing lists, not paid plans.
+  database.exec(`
+    update subscriptions
+    set kind = 'mailing_list'
+    where coalesce(kind, 'paid') = 'paid'
+      and lower(coalesce(category, '')) = 'newsletter'
+      and amount is null
+  `)
 
   database.exec(`
     create unique index if not exists subscriptions_unique_company

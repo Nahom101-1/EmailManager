@@ -16,6 +16,7 @@ import { detectAccount, detectSubscription } from "@/lib/detection"
 import { decryptPassword } from "@/lib/crypto/credentials"
 import { fetchEmails } from "@/lib/imap/client"
 import type { ImapConfig } from "@/types/provider"
+import { runEmailIntelligence } from "@/lib/ai/pipeline"
 
 export async function syncImapProvider(input: { providerId: string }) {
   const provider = getProvider(input.providerId)
@@ -130,6 +131,25 @@ export async function syncImapProvider(input: { providerId: string }) {
       subscriptionsDetected,
       accountsDetected,
     })
+
+    // Best-effort: run email intelligence pipeline (embed → classify → extract → cluster).
+    // Skips body fetching for IMAP (no Google token), uses snippet only.
+    const emailIds = [...emailIdMap.values()]
+    if (emailIds.length > 0) {
+      const origin = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? "http://localhost:3000"
+      try {
+        const intel = await runEmailIntelligence({ providerId: input.providerId, origin, emailIds })
+        return {
+          listed: rawEmails.length,
+          stored,
+          subscriptionsDetected,
+          accountsDetected,
+          intelligence: intel,
+        }
+      } catch (err) {
+        console.warn("[imap-sync] intelligence pipeline skipped:", err)
+      }
+    }
 
     return {
       listed: rawEmails.length,

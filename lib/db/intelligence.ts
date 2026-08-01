@@ -520,6 +520,54 @@ export function searchSubscriptionsAccounts(
   ].slice(0, limit)
 }
 
+export interface UpcomingBill {
+  emailId: string
+  vendor: string | null
+  amount: number | null
+  currency: string | null
+  billing_cycle: string | null
+  due_date: string
+  intent: string
+}
+
+/** Returns renewal/receipt emails with a due_date within the next `days` days. */
+export function getUpcomingBills(days = 30): UpcomingBill[] {
+  const cutoff = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  return getDb()
+    .prepare(
+      `SELECT email_id as emailId, vendor, amount, currency, billing_cycle, due_date, intent
+       FROM email_intelligence
+       WHERE intent IN ('renewal','receipt') AND due_date IS NOT NULL
+         AND due_date >= ? AND due_date <= ?
+       ORDER BY due_date ASC
+       LIMIT 8`
+    )
+    .all(today, cutoff) as UpcomingBill[]
+}
+
+export interface EndingTrial {
+  emailId: string
+  vendor: string | null
+  due_date: string
+}
+
+/** Returns trial emails with a due_date within the next `days` days. */
+export function getEndingTrials(days = 14): EndingTrial[] {
+  const cutoff = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  return getDb()
+    .prepare(
+      `SELECT email_id as emailId, vendor, due_date
+       FROM email_intelligence
+       WHERE intent = 'trial' AND due_date IS NOT NULL
+         AND due_date >= ? AND due_date <= ?
+       ORDER BY due_date ASC
+       LIMIT 6`
+    )
+    .all(today, cutoff) as EndingTrial[]
+}
+
 function safeJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback
   try {

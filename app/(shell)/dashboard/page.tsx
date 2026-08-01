@@ -12,6 +12,7 @@ import {
   type LocalSubscription,
 } from "@/lib/db/local"
 import { buildBriefing } from "@/lib/ai/context"
+import { getUpcomingBills, getEndingTrials } from "@/lib/db/intelligence"
 
 type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
 
@@ -41,6 +42,8 @@ export default async function DashboardPage() {
   const accounts = listAccounts(userId)
   const runs = listSyncRuns(userId, 4)
   const briefing = buildBriefing(userId)
+  const upcomingBills = getUpcomingBills(30)
+  const endingTrials = getEndingTrials(14)
 
   const syncTargets = providers.filter((p) => p.status !== "error").map((p) => ({ id: p.id, email: p.email }))
 
@@ -307,6 +310,48 @@ export default async function DashboardPage() {
                 </div>
                 <StatusBadge status={p.status} pulse={p.status === "syncing"} />
               </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid mt18" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <Card>
+          <div className="card-head"><h3 className="center gap8"><Icon name="receipt" size={14} className="muted" />Bills due soon</h3><span className="badge">{upcomingBills.length}</span></div>
+          <div className="list">
+            {upcomingBills.length === 0 ? (
+              <div className="card-pad muted" style={{ fontSize: 12.5 }}>No upcoming bills detected.</div>
+            ) : upcomingBills.map((bill) => (
+              <Link key={bill.emailId} href={`/emails/${bill.emailId}`} className="list-row click">
+                <Tile mono={bill.vendor ? bill.vendor.slice(0, 2).toUpperCase() : "$$"} size="sm" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row-title" style={{ fontSize: 12.5 }}>{bill.vendor ?? "Unknown vendor"}</div>
+                  <div className="row-sub mono">{bill.due_date}</div>
+                </div>
+                {bill.amount != null && (
+                  <div style={{ textAlign: "right" }}>
+                    <div className="num" style={{ fontWeight: 600 }}>{bill.currency === "USD" || !bill.currency ? "$" : bill.currency}{fmt(bill.amount)}</div>
+                    <div className="row-sub mono">/{bill.billing_cycle === "yearly" ? "yr" : "mo"}</div>
+                  </div>
+                )}
+              </Link>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="card-head"><h3 className="center gap8"><Icon name="clock" size={14} className="muted" />Trials ending soon</h3><span className="badge">{endingTrials.length}</span></div>
+          <div className="list">
+            {endingTrials.length === 0 ? (
+              <div className="card-pad muted" style={{ fontSize: 12.5 }}>No trials ending soon.</div>
+            ) : endingTrials.map((trial) => (
+              <Link key={trial.emailId} href={`/emails/${trial.emailId}`} className="list-row click">
+                <Tile mono={trial.vendor ? trial.vendor.slice(0, 2).toUpperCase() : "TR"} size="sm" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row-title" style={{ fontSize: 12.5 }}>{trial.vendor ?? "Unknown service"}</div>
+                  <div className="row-sub mono">{trial.due_date}</div>
+                </div>
+              </Link>
             ))}
           </div>
         </Card>

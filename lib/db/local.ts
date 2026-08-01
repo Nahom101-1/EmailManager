@@ -28,6 +28,8 @@ export interface LocalProvider {
   history_synced_count: number
   history_complete: boolean
   history_target: number
+  gmail_history_id: string | null
+  newest_internal_date: string | null
 }
 
 export interface GoogleAccount {
@@ -286,6 +288,8 @@ export function updateProviderHistoryCursor(input: {
   historySyncedCount: number
   historyComplete: boolean
   historyTarget?: number
+  gmailHistoryId?: string | null
+  newestInternalDate?: string | null
 }) {
   getDb()
     .prepare(`
@@ -293,7 +297,14 @@ export function updateProviderHistoryCursor(input: {
       set history_page_token = @historyPageToken,
           history_synced_count = @historySyncedCount,
           history_complete = @historyComplete,
-          history_target = coalesce(@historyTarget, history_target)
+          history_target = coalesce(@historyTarget, history_target),
+          gmail_history_id = coalesce(@gmailHistoryId, gmail_history_id),
+          newest_internal_date = case
+            when @newestInternalDate is null then newest_internal_date
+            when newest_internal_date is null then @newestInternalDate
+            when @newestInternalDate > newest_internal_date then @newestInternalDate
+            else newest_internal_date
+          end
       where id = @providerId
     `)
     .run({
@@ -302,7 +313,40 @@ export function updateProviderHistoryCursor(input: {
       historySyncedCount: input.historySyncedCount,
       historyComplete: input.historyComplete ? 1 : 0,
       historyTarget: input.historyTarget ?? null,
+      gmailHistoryId: input.gmailHistoryId ?? null,
+      newestInternalDate: input.newestInternalDate ?? null,
     })
+}
+
+/** Persist only the resume page token (crash-safe before heavy work). */
+export function updateProviderPageToken(providerId: string, pageToken: string | null) {
+  getDb()
+    .prepare("update providers set history_page_token = ? where id = ?")
+    .run(pageToken, providerId)
+}
+
+/** Unique emails stored for a provider — used for crawl progress toward target. */
+export function countProviderEmails(providerId: string): number {
+  const row = getDb()
+    .prepare("select count(*) as count from emails where provider_id = ?")
+    .get(providerId) as { count: number }
+  return row.count
+}
+
+/** Mark sync_runs stuck in "running" longer than maxAgeMs as errored. */
+export function reclaimStaleSyncRuns(maxAgeMs = 15 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
+  getDb()
+    .prepare(
+      `
+      update sync_runs
+      set status = 'error',
+          finished_at = ?,
+          error = coalesce(error, 'Sync timed out or process exited')
+      where status = 'running' and started_at < ?
+    `
+    )
+    .run(new Date().toISOString(), cutoff)
 }
 
 export function deleteProvider(providerId: string) {
@@ -422,9 +466,16 @@ export function updateGoogleAccessToken(input: {
 /* Emails                                                             */
 /* ------------------------------------------------------------------ */
 
-export function upsertGmailMessages(messages: GmailMessageInput[]) {
-  if (messages.length === 0) return 0
+export function upsertGmailMessages(messages: GmailMessageInput[]): {
+  inserted: number
+  updated: number
+  total: number
+} {
+  if (messages.length === 0) return { inserted: 0, updated: 0, total: 0 }
 
+  const existsStmt = getDb().prepare(
+    "select id from emails where provider_id = ? and gmail_message_id = ? limit 1"
+  )
   const statement = getDb().prepare(`
     insert into emails (
       id, provider_id, uid, gmail_message_id, thread_id, message_id,
@@ -447,8 +498,11 @@ export function upsertGmailMessages(messages: GmailMessageInput[]) {
       headers = excluded.headers
   `)
 
+  let inserted = 0
+  let updated = 0
   const write = getDb().transaction((items: GmailMessageInput[]) => {
     for (const item of items) {
+      const existing = existsStmt.get(item.providerId, item.gmailMessageId) as { id: string } | undefined
       statement.run({
         id: randomUUID(),
         providerId: item.providerId,
@@ -465,11 +519,13 @@ export function upsertGmailMessages(messages: GmailMessageInput[]) {
         headers: JSON.stringify(item.headers ?? {}),
         createdAt: new Date().toISOString(),
       })
+      if (existing) updated += 1
+      else inserted += 1
     }
   })
 
   write(messages)
-  return messages.length
+  return { inserted, updated, total: messages.length }
 }
 
 export function getEmailIdMap(providerId: string, gmailMessageIds: string[]): Map<string, string> {
@@ -541,6 +597,29 @@ export function listSubscriptions(userId = LOCAL_USER_ID): LocalSubscription[] {
         coalesce(s.last_seen, s.first_seen) desc
     `)
     .all(userId) as LocalSubscription[]
+}
+
+export function getSubscriptionById(
+  subscriptionId: string,
+  userId = LOCAL_USER_ID
+): LocalSubscription | null {
+  const row = getDb()
+    .prepare(
+      `
+      select
+        s.*,
+        p.email as provider_email,
+        e.subject as source_subject,
+        e.from_address as source_from,
+        e.snippet as source_snippet
+      from subscriptions s
+      left join providers p on p.id = s.provider_id
+      left join emails e on e.id = s.source_email_id
+      where s.id = ? and s.user_id = ?
+    `
+    )
+    .get(subscriptionId, userId) as LocalSubscription | undefined
+  return row ?? null
 }
 
 export function updateSubscriptionStatus(input: {
@@ -739,6 +818,7 @@ export function upsertDetectedAccounts(input: {
 /* ------------------------------------------------------------------ */
 
 export function hasRunningSyncRun(providerId: string): boolean {
+  reclaimStaleSyncRuns()
   const row = getDb()
     .prepare("select count(*) as count from sync_runs where provider_id = ? and status = 'running'")
     .get(providerId) as { count: number }
@@ -1148,6 +1228,8 @@ function migrate(database: Database.Database) {
     ["history_synced_count", "integer not null default 0"],
     ["history_complete", "integer not null default 0"],
     ["history_target", "integer not null default 2000"],
+    ["gmail_history_id", "text"],
+    ["newest_internal_date", "text"],
   ])
 
   ensureColumns(database, "emails", [
@@ -1473,12 +1555,23 @@ function migrateAccountsTable(database: Database.Database) {
 /* ------------------------------------------------------------------ */
 
 function normalizeProvider(
-  provider: Omit<LocalProvider, "tls" | "history_complete" | "history_synced_count" | "history_target" | "history_page_token"> & {
+  provider: Omit<
+    LocalProvider,
+    | "tls"
+    | "history_complete"
+    | "history_synced_count"
+    | "history_target"
+    | "history_page_token"
+    | "gmail_history_id"
+    | "newest_internal_date"
+  > & {
     tls: number | boolean | null
     history_page_token?: string | null
     history_synced_count?: number | null
     history_complete?: number | boolean | null
     history_target?: number | null
+    gmail_history_id?: string | null
+    newest_internal_date?: string | null
   }
 ): LocalProvider {
   return {
@@ -1488,6 +1581,8 @@ function normalizeProvider(
     history_synced_count: provider.history_synced_count ?? 0,
     history_complete: Boolean(provider.history_complete),
     history_target: provider.history_target ?? 2000,
+    gmail_history_id: provider.gmail_history_id ?? null,
+    newest_internal_date: provider.newest_internal_date ?? null,
   }
 }
 

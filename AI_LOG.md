@@ -150,11 +150,65 @@ Confirmed by user screenshot:
 
 ### Next Suggested Work
 
-1. Add a sync button per Gmail account.
-2. Refresh Google access tokens using stored refresh tokens.
-3. Call Gmail API `users.messages.list`.
-4. Fetch message metadata/snippets with `users.messages.get`.
-5. Store email metadata in SQLite.
-6. Update dashboard `Emails scanned`.
-7. Add subscription detection heuristics.
-8. Update dashboard `Subscriptions found`.
+1. Build a subscriptions review page.
+2. Add richer subscription detection and amount parsing.
+3. Add account discovery heuristics.
+4. Add a disconnect/revoke flow for Google accounts.
+5. Add configurable sync limits and background sync.
+
+## 2026-06-12 Gmail Sync Update
+
+Added the first working Gmail sync path:
+
+- Refreshes Google access tokens with the stored refresh token when needed.
+- Lists recent Gmail messages with Gmail API `users.messages.list`.
+- Fetches message metadata sequentially with `users.messages.get` and `format=metadata`.
+- Stores Gmail message IDs, thread IDs, labels, selected headers, subject, sender, recipient, date, and snippets in SQLite.
+- Adds a per-account **Sync** button on the dashboard.
+- Updates dashboard counts for emails scanned and subscription candidates.
+- Adds basic subscription candidate detection from sender, subject, and snippet keywords.
+
+Important implementation note:
+
+- The first attempt fetched 25 Gmail message details concurrently and Google returned `429 Too many concurrent requests for user`.
+- Sync now fetches message metadata sequentially and defaults to 10 recent messages per sync.
+- Running sync repeatedly updates the same rows instead of duplicating email or subscription records.
+
+Verified locally:
+
+```bash
+npm run lint
+npm run build
+```
+
+Manual sync verification:
+
+- Sync route returned `{"listed":10,"stored":10,"subscriptionCandidates":1}`.
+- SQLite showed 10 email metadata rows.
+- SQLite showed 1 subscription candidate.
+- Running sync a second time kept counts at 10 emails and 1 subscription candidate.
+
+## 2026-06-12 Subscriptions Review Update
+
+Added the first product layer on top of detected subscription candidates:
+
+- Added `/subscriptions`.
+- Added summary cards for candidates, needs review, and marked active.
+- Added subscription cards showing company, status, email used, last seen date, source subject, and source snippet when available.
+- Added status controls for `active`, `cancelled`, `ignored`, and `unknown`.
+- Added `PATCH /api/subscriptions/[subscriptionId]` to update local review status.
+- Added a Subscriptions nav item.
+- Added SQLite migration logic so subscription status supports the new `ignored` state.
+
+Verified locally:
+
+```bash
+npm run lint
+npm run build
+```
+
+Manual verification:
+
+- `/subscriptions` rendered the existing detected candidate.
+- Status update API changed a candidate to `active`.
+- Candidate was restored to `unknown` after testing.

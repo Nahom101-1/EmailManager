@@ -9,6 +9,9 @@ The current app runs entirely on your machine. Gmail connects through Google OAu
 - Local SQLite database for app data.
 - Google OAuth connection for Gmail and Google Workspace.
 - Gmail API read-only token storage.
+- Gmail sync for recent message metadata.
+- Basic subscription candidate detection from synced metadata.
+- Subscriptions review page with status controls.
 - Manual IMAP connection testing for custom providers.
 - Domeneshop IMAP preset.
 - Dashboard listing connected inboxes.
@@ -16,11 +19,11 @@ The current app runs entirely on your machine. Gmail connects through Google OAu
 
 Not implemented yet:
 
-- Gmail message sync.
-- Subscription detection.
+- Rich subscription review workflow.
 - Account discovery.
 - Production auth.
-- Token refresh jobs.
+- Background sync jobs.
+- Token revocation/disconnect UI.
 
 ## Tech Stack
 
@@ -175,6 +178,8 @@ npm run start
 app/
   api/google/         Google OAuth connect and callback routes
   api/providers/      Manual IMAP test/connect routes
+  api/providers/[id]/ Gmail provider sync route
+  api/subscriptions/  Subscription status update route
   connect/            Inbox connection page
   dashboard/          Local inbox dashboard
 components/
@@ -207,6 +212,10 @@ Recommended manual check:
 3. Click **Connect Google**.
 4. Complete Google OAuth.
 5. Confirm `/dashboard` shows the Gmail account as active.
+6. Click **Sync** on the Gmail account.
+7. Confirm `Emails scanned` updates.
+8. Open `/subscriptions`.
+9. Confirm subscription candidates can be marked active, cancelled, ignored, or review.
 
 ## GitHub Safety
 

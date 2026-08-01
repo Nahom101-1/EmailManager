@@ -5,6 +5,7 @@ import {
   getGoogleAccount,
   getProvider,
   hasRunningSyncRun,
+  updateProviderHistoryCursor,
   updateProviderSyncStatus,
   upsertDetectedAccounts,
   upsertDetectedSubscriptions,
@@ -29,14 +30,22 @@ const METADATA_HEADERS = [
   "Reply-To",
   "Sender",
 ]
-// Keep concurrency at 1 and pace requests — Gmail returns 429s under bursts.
-const FETCH_DELAY_MS = 120
+
+const PAGE_SIZE = 100
+const DEFAULT_HISTORY_TARGET = 2000
+/** Messages fetched per Sync click (continues from cursor). */
+const MESSAGES_PER_SYNC = 400
+const FETCH_CONCURRENCY = 2
+const FETCH_DELAY_MS = 80
 const MAX_RETRIES = 4
 
 export async function syncGmailProvider(input: {
   providerId: string
   origin: string
-  maxResults?: number
+  /** Override history target (default 2000). */
+  historyTarget?: number
+  /** Messages to pull this run (default 400). */
+  messagesPerSync?: number
 }) {
   const provider = getProvider(input.providerId)
   if (!provider || provider.type !== "gmail") {
@@ -52,31 +61,35 @@ export async function syncGmailProvider(input: {
     throw new Error("A sync is already running for this account")
   }
 
+  const historyTarget = input.historyTarget ?? provider.history_target ?? DEFAULT_HISTORY_TARGET
+  const messagesPerSync = input.messagesPerSync ?? MESSAGES_PER_SYNC
   const syncRunId = createSyncRun(input.providerId)
   updateProviderSyncStatus({ providerId: input.providerId, status: "syncing", errorMessage: null })
 
   try {
     const accessToken = await getValidGoogleAccessToken({ account, origin: input.origin })
-    const listed = await listGmailMessages({
+
+    // Resume history crawl when incomplete; otherwise pull newest pages (incremental).
+    const resumeToken =
+      !provider.history_complete && provider.history_page_token
+        ? provider.history_page_token
+        : undefined
+
+    const listed = await listGmailMessagesPaged({
       accessToken,
-      maxResults: input.maxResults ?? 50,
+      pageSize: PAGE_SIZE,
+      maxMessages: messagesPerSync,
+      pageToken: resumeToken,
     })
 
-    const messages: GmailMessageInput[] = []
-    for (const message of listed) {
-      messages.push(
-        await getGmailMessageMetadata({
-          accessToken,
-          providerId: input.providerId,
-          messageId: message.id,
-        })
-      )
-      await delay(FETCH_DELAY_MS)
-    }
+    const messages = await fetchMetadataBatch({
+      accessToken,
+      providerId: input.providerId,
+      messageIds: listed.messages.map((m) => m.id),
+    })
 
     const stored = upsertGmailMessages(messages)
 
-    // Resolve stored email row ids so detected items can link evidence.
     const emailIdMap = getEmailIdMap(
       input.providerId,
       messages.map((message) => message.gmailMessageId)
@@ -125,24 +138,38 @@ export async function syncGmailProvider(input: {
     const subscriptionsDetected = upsertDetectedSubscriptions({ records: subscriptionRecords })
     const accountsDetected = upsertDetectedAccounts({ records: accountRecords })
 
-    // Local embeddings + intent/cluster/extract (best-effort; never fail the sync).
-    // Process the just-synced batch, then backfill any older rows still missing vectors.
+    // Update history cursor. When history is complete, keep complete=true and
+    // clear page token so later syncs pull fresh first pages (incremental).
+    let historySyncedCount = provider.history_synced_count
+    let historyComplete = provider.history_complete
+    let nextToken: string | null = listed.nextPageToken
+
+    if (!historyComplete) {
+      historySyncedCount = Math.min(historyTarget, historySyncedCount + listed.messages.length)
+      const hitTarget = historySyncedCount >= historyTarget
+      const exhausted = !listed.nextPageToken
+      historyComplete = hitTarget || exhausted
+      if (historyComplete) nextToken = null
+    } else {
+      // Incremental mode: don't accumulate page tokens into a deep crawl.
+      nextToken = null
+      historySyncedCount = Math.max(historySyncedCount, listed.messages.length)
+    }
+
+    updateProviderHistoryCursor({
+      providerId: input.providerId,
+      historyPageToken: nextToken,
+      historySyncedCount,
+      historyComplete,
+      historyTarget,
+    })
+
     let intelligence = { embedded: 0, classified: 0, clusters: 0 }
     try {
-      const batch = await runEmailIntelligence({
-        providerId: input.providerId,
-        origin: input.origin,
-        emailIds: [...emailIdMap.values()],
-      })
-      const backlog = await runEmailIntelligence({
+      intelligence = await runEmailIntelligence({
         providerId: input.providerId,
         origin: input.origin,
       })
-      intelligence = {
-        embedded: batch.embedded + backlog.embedded,
-        classified: batch.classified + backlog.classified,
-        clusters: backlog.clusters || batch.clusters,
-      }
     } catch (err) {
       console.warn("[gmail] email intelligence pipeline failed:", err)
     }
@@ -157,18 +184,24 @@ export async function syncGmailProvider(input: {
     finishSyncRun({
       id: syncRunId,
       status: "success",
-      emailsSeen: listed.length,
+      emailsSeen: listed.messages.length,
       emailsStored: stored,
       subscriptionsDetected,
       accountsDetected,
     })
 
     return {
-      listed: listed.length,
+      listed: listed.messages.length,
       stored,
       subscriptionsDetected,
       accountsDetected,
       intelligence,
+      history: {
+        synced: historySyncedCount,
+        target: historyTarget,
+        complete: historyComplete,
+        pageTokenPresent: Boolean(nextToken),
+      },
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gmail sync failed"
@@ -199,21 +232,72 @@ interface GmailMessageResponse {
   }
 }
 
-async function listGmailMessages(input: {
+async function listGmailMessagesPaged(input: {
   accessToken: string
-  maxResults: number
-}) {
-  const url = new URL(GMAIL_MESSAGES_URL)
-  url.searchParams.set("maxResults", String(input.maxResults))
-  url.searchParams.set("q", "newer_than:365d")
+  pageSize: number
+  maxMessages: number
+  pageToken?: string
+}): Promise<{
+  messages: Array<{ id: string; threadId: string }>
+  nextPageToken: string | null
+}> {
+  const collected: Array<{ id: string; threadId: string }> = []
+  let pageToken: string | undefined = input.pageToken
+  let nextPageToken: string | null = null
 
-  const res = await gmailFetch(url, input.accessToken)
-  if (!res.ok) {
-    throw new Error(describeGmailError("list", res.status, await res.text()))
+  while (collected.length < input.maxMessages) {
+    const remaining = input.maxMessages - collected.length
+    const pageSize = Math.min(input.pageSize, remaining)
+
+    const url = new URL(GMAIL_MESSAGES_URL)
+    url.searchParams.set("maxResults", String(pageSize))
+    url.searchParams.set("q", "newer_than:365d")
+    if (pageToken) url.searchParams.set("pageToken", pageToken)
+
+    const res = await gmailFetch(url, input.accessToken)
+    if (!res.ok) {
+      throw new Error(describeGmailError("list", res.status, await res.text()))
+    }
+
+    const data = (await res.json()) as GmailListResponse
+    const batch = data.messages ?? []
+    collected.push(...batch)
+    nextPageToken = data.nextPageToken ?? null
+
+    if (!data.nextPageToken || batch.length === 0) break
+    pageToken = data.nextPageToken
   }
 
-  const data = (await res.json()) as GmailListResponse
-  return data.messages ?? []
+  return { messages: collected, nextPageToken }
+}
+
+async function fetchMetadataBatch(input: {
+  accessToken: string
+  providerId: string
+  messageIds: string[]
+}): Promise<GmailMessageInput[]> {
+  const results: GmailMessageInput[] = new Array(input.messageIds.length)
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < input.messageIds.length) {
+      const idx = cursor
+      cursor += 1
+      const messageId = input.messageIds[idx]
+      results[idx] = await getGmailMessageMetadata({
+        accessToken: input.accessToken,
+        providerId: input.providerId,
+        messageId,
+      })
+      await delay(FETCH_DELAY_MS)
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(FETCH_CONCURRENCY, input.messageIds.length) }, () =>
+    worker()
+  )
+  await Promise.all(workers)
+  return results.filter(Boolean)
 }
 
 async function getGmailMessageMetadata(input: {
@@ -251,7 +335,6 @@ async function getGmailMessageMetadata(input: {
   }
 }
 
-// Fetch with backoff on 429 / 5xx so a transient rate limit doesn't fail a sync.
 async function gmailFetch(url: URL, accessToken: string): Promise<Response> {
   let attempt = 0
   while (true) {

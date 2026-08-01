@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Icon } from "@/components/ui"
 import { useTheme } from "@/components/theme/ThemeProvider"
 import { SyncProvider } from "@/components/shell/SyncProvider"
@@ -23,7 +23,13 @@ export function AppShell({
   account: { name: string; sub: string; initials: string }
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { theme, toggleTheme } = useTheme()
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" })
+    router.push("/login")
+  }
 
   return (
     <SyncProvider>
@@ -58,6 +64,10 @@ export function AppShell({
 
           <button className="btn ghost sm icon" onClick={toggleTheme} aria-label="Toggle theme">
             <Icon name={theme === "dark" ? "sun" : "moon"} size={15} />
+          </button>
+
+          <button className="btn ghost sm icon" onClick={logout} aria-label="Sign out">
+            <Icon name="logout" size={15} />
           </button>
         </div>
 

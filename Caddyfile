@@ -1,0 +1,11 @@
+# Replace yourdomain.com with your actual domain (or IP for local network access)
+# Caddy auto-provisions HTTPS via Let's Encrypt — no config needed.
+
+yourdomain.com {
+    reverse_proxy localhost:3000
+}
+
+# Uncomment for local network access (no domain, uses IP):
+# :3000 {
+#     reverse_proxy localhost:3001
+# }

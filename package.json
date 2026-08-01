@@ -18,7 +18,9 @@
     "ci": "npm run lint && npm run format:check && npm test && npm run audit && npm run build",
     "cli": "node --import tsx/esm cli/run.ts",
     "web": "next dev",
-    "setup": "bash scripts/setup.sh"
+    "setup": "bash scripts/setup.sh",
+    "icons": "bash scripts/gen-icons.sh",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

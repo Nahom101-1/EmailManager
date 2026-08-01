@@ -3,7 +3,7 @@ import { connection } from "next/server"
 import { Btn, Icon, StatusBadge } from "@/components/ui"
 import { SyncAllButton } from "@/components/shell/SyncButtons"
 import { InboxSyncActions } from "@/components/shell/InboxSyncActions"
-import { FocusCard } from "@/components/focus/FocusCard"
+import { FocusBoard } from "@/components/focus/FocusBoard"
 import { FocusSection } from "@/components/focus/FocusSection"
 import {
   getDashboardStats,
@@ -135,41 +135,23 @@ export default async function DashboardPage() {
         <SyncAllButton targets={syncTargets} />
       </div>
 
-      {today.now.length > 0 && (
-        <FocusSection id="now" label="Now" count={today.now.length}>
-          {today.now.map((item) => (
-            <FocusCard key={item.id} item={item} />
-          ))}
-        </FocusSection>
-      )}
-
-      {today.thisWeek.length > 0 && (
-        <FocusSection id="week" label="This week" count={today.thisWeek.length}>
-          {today.thisWeek.map((item) => (
-            <FocusCard key={item.id} item={item} />
-          ))}
-        </FocusSection>
-      )}
-
-      {today.waiting.length > 0 && (
-        <FocusSection id="waiting" label="Waiting for others" count={today.waiting.length}>
-          {today.waiting.map((item) => (
-            <FocusCard key={item.id} item={item} />
-          ))}
-        </FocusSection>
-      )}
-
-      {today.forgotten.length > 0 && (
-        <FocusSection
-          id="forgotten"
-          label="Possibly forgotten"
-          count={today.forgotten.length}
-          defaultOpen={today.now.length === 0}
-        >
-          {today.forgotten.map((item) => (
-            <FocusCard key={item.id} item={item} />
-          ))}
-        </FocusSection>
+      {(today.now.length > 0 ||
+        today.thisWeek.length > 0 ||
+        today.waiting.length > 0 ||
+        today.forgotten.length > 0) && (
+        <FocusBoard
+          sections={[
+            { id: "now", label: "Now", items: today.now },
+            { id: "week", label: "This week", items: today.thisWeek },
+            { id: "waiting", label: "Waiting for others", items: today.waiting },
+            {
+              id: "forgotten",
+              label: "Possibly forgotten",
+              items: today.forgotten,
+              defaultOpen: today.now.length === 0,
+            },
+          ].filter((s) => s.items.length > 0)}
+        />
       )}
 
       {digestParts.length > 0 && (

@@ -95,9 +95,13 @@ export default async function EmailDetailPage({
     ? `https://mail.google.com/mail/u/0/#all/${email.gmail_message_id}`
     : null
 
+  const namedAttachments = Array.from(
+    new Set(threadBase.flatMap((m) => m.attachments ?? []).filter(Boolean))
+  )
   const attachmentHint =
-    email.headers["Content-Type"]?.toLowerCase().includes("multipart") ||
-    /attachment|pdf|invoice|contract/i.test(`${email.subject ?? ""} ${email.snippet ?? ""}`)
+    namedAttachments.length === 0 &&
+    (email.headers["Content-Type"]?.toLowerCase().includes("multipart") ||
+      /attachment|pdf|invoice|contract/i.test(`${email.subject ?? ""} ${email.snippet ?? ""}`))
 
   return (
     <div className="page page-wide fade-in conv-page">
@@ -253,10 +257,25 @@ export default async function EmailDetailPage({
 
           <Card className="card-pad">
             <h3 className="conv-rail-title">Attachments</h3>
-            <p className="conv-rail-text">
-              {attachmentHint
-                ? "Possible attachment or document mentioned — metadata only; nothing is auto-opened."
-                : "No attachment metadata stored for this message."}
+            {namedAttachments.length > 0 ? (
+              <ul className="conv-rail-list">
+                {namedAttachments.map((name) => (
+                  <li key={name}>
+                    <span className="mono" style={{ fontSize: 11.5 }}>
+                      {name}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="conv-rail-text">
+                {attachmentHint
+                  ? "Possible attachment or document mentioned in headers/snippet — filenames not stored (common for Gmail metadata sync). Nothing is auto-opened or uploaded."
+                  : "No attachment filenames stored for this thread."}
+              </p>
+            )}
+            <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+              Metadata only — LifeOS never auto-follows links or auto-uploads files.
             </p>
           </Card>
 

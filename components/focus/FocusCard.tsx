@@ -33,19 +33,38 @@ export function FocusCard({
   onSnooze,
   onDone,
   onNotForMe,
+  selected = false,
+  expanded,
+  onExpandedChange,
 }: {
   item: FocusCardModel
   onSnooze?: () => void
   onDone?: () => void
   onNotForMe?: () => void
+  selected?: boolean
+  /** Controlled expand; falls back to internal toggle when omitted */
+  expanded?: boolean
+  onExpandedChange?: (open: boolean) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [localExpanded, setLocalExpanded] = useState(false)
   const priority = item.priority ?? "medium"
   const confPct =
     item.confidence == null ? null : item.confidence <= 1 ? item.confidence * 100 : item.confidence
+  const controlled = expanded !== undefined
+  const isExpanded = controlled ? Boolean(expanded) : localExpanded
+
+  function toggleExpand() {
+    if (controlled) onExpandedChange?.(!isExpanded)
+    else setLocalExpanded((v) => !v)
+  }
 
   return (
-    <article className="focus-card" aria-labelledby={`focus-${item.id}-title`}>
+    <article
+      className={"focus-card" + (selected ? " is-selected" : "")}
+      aria-labelledby={`focus-${item.id}-title`}
+      data-focus-id={item.id}
+      data-selected={selected ? "true" : undefined}
+    >
       <header className="focus-card-head">
         <div className="focus-card-title-row">
           <h3 id={`focus-${item.id}-title`} className="focus-card-title">
@@ -61,11 +80,14 @@ export function FocusCard({
           <button
             type="button"
             className="btn ghost xs icon focus-card-toggle"
-            aria-expanded={expanded}
-            aria-label={expanded ? "Collapse details" : "Expand details"}
-            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? "Collapse details" : "Expand details"}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleExpand()
+            }}
           >
-            <Icon name={expanded ? "chevUp" : "chevD"} size={14} />
+            <Icon name={isExpanded ? "chevUp" : "chevD"} size={14} />
           </button>
         </div>
         <p className="focus-card-explain">{item.explanation}</p>
@@ -86,8 +108,8 @@ export function FocusCard({
       )}
 
       <div className="focus-card-meta">
-        {item.evidenceCount != null && (
-          item.evidenceHref ? (
+        {item.evidenceCount != null &&
+          (item.evidenceHref ? (
             <Link href={item.evidenceHref} className="focus-card-evidence">
               Evidence: {item.evidenceCount} message{item.evidenceCount === 1 ? "" : "s"} ▸
             </Link>
@@ -95,8 +117,7 @@ export function FocusCard({
             <span className="focus-card-evidence">
               Evidence: {item.evidenceCount} message{item.evidenceCount === 1 ? "" : "s"}
             </span>
-          )
-        )}
+          ))}
         {confPct != null && (
           <span className="focus-card-conf">
             Confidence: <Conf value={confPct} showLabel />
@@ -104,7 +125,7 @@ export function FocusCard({
         )}
       </div>
 
-      {expanded && (
+      {isExpanded && (
         <div className="focus-card-disclosure">
           <p>
             Details stay conservative: LifeOS shows supporting signals when available and leaves

@@ -10,6 +10,11 @@ const ROWS: { keys: string; action: string }[] = [
   { keys: "g r", action: "Go to Review" },
   { keys: "g q", action: "Go to Ask" },
   { keys: "g s", action: "Go to Settings" },
+  { keys: "j / k", action: "Focus: move selection" },
+  { keys: "e", action: "Focus: expand / collapse" },
+  { keys: "s", action: "Focus: snooze (session stub)" },
+  { keys: "r", action: "Focus: open / review item" },
+  { keys: "[ / ]", action: "Focus: prev / next section" },
   { keys: "?", action: "Show this help" },
   { keys: "esc", action: "Close palette / help" },
 ]
@@ -49,7 +54,7 @@ export function ShortcutsHelp({
           ))}
         </div>
         <div className="cmdk-footer">
-          <span>j/k · e · s · r coming with Focus keyboard nav</span>
+          <span>Focus list: j/k · e · s · r · [ ] — ignored while typing</span>
         </div>
       </div>
     </div>

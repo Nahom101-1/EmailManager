@@ -128,6 +128,8 @@ export interface LocalEmail {
   snippet: string | null
   labels: string[]
   headers: Record<string, string>
+  /** Filename list when stored (often empty for Gmail metadata sync). */
+  attachments: string[]
   provider_email: string | null
   provider_name: string | null
 }
@@ -609,13 +611,18 @@ export function getEmailIdMap(providerId: string, gmailMessageIds: string[]): Ma
   return map
 }
 
-function mapEmailRow(
-  row: Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }
-): LocalEmail {
+type EmailRowRaw = Omit<LocalEmail, "labels" | "headers" | "attachments"> & {
+  labels: string
+  headers: string
+  attachments: string
+}
+
+function mapEmailRow(row: EmailRowRaw): LocalEmail {
   return {
     ...row,
     labels: safeJsonParse<string[]>(row.labels, []),
     headers: safeJsonParse<Record<string, string>>(row.headers, {}),
+    attachments: safeJsonParse<string[]>(row.attachments, []),
   }
 }
 
@@ -629,8 +636,7 @@ export function getEmailById(emailId: string): LocalEmail | null {
       where e.id = ?
     `
     )
-    .get(emailId) as
-    (Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }) | undefined
+    .get(emailId) as EmailRowRaw | undefined
 
   if (!row) return null
   return mapEmailRow(row)
@@ -654,9 +660,7 @@ export function listEmailsInThread(
       limit ?
     `
     )
-    .all(providerId, threadId, limit) as Array<
-    Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }
-  >
+    .all(providerId, threadId, limit) as EmailRowRaw[]
   return rows.map(mapEmailRow)
 }
 

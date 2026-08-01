@@ -88,30 +88,83 @@ export function emailEmbedText(input: {
   return parts.join("\n")
 }
 
-export async function embedText(text: string): Promise<{ vector: Float32Array; model: string }> {
-  const cleaned = text.replace(/\s+/g, " ").trim()
-  if (!cleaned) {
-    return { vector: new Float32Array(EMBEDDING_DIMS), model: FALLBACK_MODEL }
+function parseExtractorOutput(
+  data: Float32Array | number[],
+  count: number
+): Float32Array[] {
+  const flat = data instanceof Float32Array ? data : Float32Array.from(data)
+  if (count === 1) {
+    if (flat.length === EMBEDDING_DIMS) return [flat]
+    return [hashEmbed("")]
   }
+  const dims = Math.floor(flat.length / count)
+  const out: Float32Array[] = []
+  for (let i = 0; i < count; i++) {
+    out.push(flat.slice(i * dims, (i + 1) * dims))
+  }
+  return out
+}
 
+export async function embedText(text: string): Promise<{ vector: Float32Array; model: string }> {
+  const [result] = await embedTexts([text])
+  return result
+}
+
+/** Batch embed — uses the transformer once when available. */
+export async function embedTexts(
+  texts: string[]
+): Promise<Array<{ vector: Float32Array; model: string }>> {
+  if (texts.length === 0) return []
+
+  const cleaned = texts.map((t) => t.replace(/\s+/g, " ").trim())
   const extractor = await getExtractor()
   if (!extractor) {
-    return { vector: hashEmbed(cleaned), model: FALLBACK_MODEL }
+    return cleaned.map((t) => ({
+      vector: t ? hashEmbed(t) : new Float32Array(EMBEDDING_DIMS),
+      model: FALLBACK_MODEL,
+    }))
   }
 
   try {
-    const output = await extractor(cleaned, { pooling: "mean", normalize: true })
-    const raw = output.data
-    const vector = raw instanceof Float32Array ? raw : Float32Array.from(raw)
-    if (vector.length !== EMBEDDING_DIMS) {
-      // Unexpected dims — fall back rather than corrupt the index.
-      return { vector: hashEmbed(cleaned), model: FALLBACK_MODEL }
+    // Encode in chunks to keep memory bounded.
+    const CHUNK = 32
+    const results: Array<{ vector: Float32Array; model: string }> = new Array(cleaned.length)
+    for (let start = 0; start < cleaned.length; start += CHUNK) {
+      const slice = cleaned.slice(start, start + CHUNK)
+      const nonEmptyIdx: number[] = []
+      const nonEmpty: string[] = []
+      slice.forEach((t, i) => {
+        if (t) {
+          nonEmptyIdx.push(i)
+          nonEmpty.push(t)
+        } else {
+          results[start + i] = { vector: new Float32Array(EMBEDDING_DIMS), model: FALLBACK_MODEL }
+        }
+      })
+      if (nonEmpty.length === 0) continue
+
+      const output = await extractor(nonEmpty.length === 1 ? nonEmpty[0] : nonEmpty, {
+        pooling: "mean",
+        normalize: true,
+      })
+      const vectors = parseExtractorOutput(output.data, nonEmpty.length)
+      nonEmptyIdx.forEach((localIdx, j) => {
+        const vector = vectors[j]
+        if (!vector || vector.length !== EMBEDDING_DIMS) {
+          results[start + localIdx] = { vector: hashEmbed(nonEmpty[j]), model: FALLBACK_MODEL }
+        } else {
+          results[start + localIdx] = { vector, model: TRANSFORMER_MODEL }
+        }
+      })
     }
-    return { vector, model: TRANSFORMER_MODEL }
+    return results
   } catch (err) {
-    console.warn("[embeddings] encode failed, using hash fallback:", err)
+    console.warn("[embeddings] batch encode failed, using hash fallback:", err)
     useFallback = true
-    return { vector: hashEmbed(cleaned), model: FALLBACK_MODEL }
+    return cleaned.map((t) => ({
+      vector: t ? hashEmbed(t) : new Float32Array(EMBEDDING_DIMS),
+      model: FALLBACK_MODEL,
+    }))
   }
 }
 

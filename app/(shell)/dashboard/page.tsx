@@ -12,6 +12,7 @@ import {
   type LocalSubscription,
 } from "@/lib/db/local"
 import { buildBriefing } from "@/lib/ai/context"
+import { getOverviewStats, listClusters, listOverviewDaily } from "@/lib/db/intelligence"
 import { getUpcomingBills, getEndingTrials } from "@/lib/db/intelligence"
 
 type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
@@ -42,6 +43,12 @@ export default async function DashboardPage() {
   const accounts = listAccounts(userId)
   const runs = listSyncRuns(userId, 4)
   const briefing = buildBriefing(userId)
+  const overview = getOverviewStats(userId)
+  const daily = listOverviewDaily(userId, 7)
+  const topClusters = listClusters(6).filter((c) => c.size > 1)
+  const historyIncomplete = providers.some((p) => !p.history_complete)
+  const historySynced = providers.reduce((t, p) => t + (p.history_synced_count ?? 0), 0)
+  const historyTarget = providers.reduce((t, p) => t + (p.history_target ?? 2000), 0)
   const upcomingBills = getUpcomingBills(30)
   const endingTrials = getEndingTrials(14)
 
@@ -153,6 +160,102 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      <div style={{ marginTop: "var(--gap)", marginBottom: "var(--gap)" }}>
+        <Card>
+          <div className="card-head">
+            <h3 className="center gap8"><Icon name="layers" size={15} />Corpus overview</h3>
+            {historyIncomplete ? (
+              <SyncAllButton targets={syncTargets} size="xs">Continue sync</SyncAllButton>
+            ) : (
+              <span className="sub mono">
+                {overview
+                  ? `${overview.classified_count.toLocaleString()} / ${overview.email_count.toLocaleString()} classified`
+                  : "Run a sync to index"}
+              </span>
+            )}
+          </div>
+          <div className="card-pad" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {[
+                {
+                  l: "History crawl",
+                  v: historyIncomplete
+                    ? `${historySynced.toLocaleString()} / ${historyTarget.toLocaleString()}`
+                    : `${stats.emailCount.toLocaleString()}`,
+                  s: historyIncomplete ? "catching up" : "complete",
+                },
+                {
+                  l: "Embedded",
+                  v: overview ? overview.embedded_count.toLocaleString() : "0",
+                  s: overview && overview.email_count
+                    ? `${Math.round((overview.embedded_count / Math.max(1, overview.email_count)) * 100)}%`
+                    : "—",
+                },
+                {
+                  l: "Action-like",
+                  v: overview ? overview.action_count.toLocaleString() : "0",
+                  s: "security · renewals · replies",
+                },
+                {
+                  l: "Money events",
+                  v: overview ? overview.money_event_count.toLocaleString() : "0",
+                  s: "receipts with amounts",
+                },
+              ].map((x) => (
+                <div key={x.l} className="card" style={{ padding: 12, background: "var(--surface-inset)" }}>
+                  <div className="stat" style={{ padding: 0, gap: 3 }}>
+                    <span className="label">{x.l}</span>
+                    <span className="val" style={{ fontSize: 20 }}>{x.v}</span>
+                    <span className="delta">{x.s}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {overview && Object.keys(overview.intent_counts).length > 0 && (
+              <div>
+                <div className="section-label" style={{ margin: "0 0 8px" }}>Intent breakdown</div>
+                <div className="center gap6 wrap">
+                  {(Object.entries(overview.intent_counts) as Array<[string, number]>)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([intent, count]) => (
+                      <span key={intent} className="chip">
+                        {intent}<span className="num faint" style={{ fontSize: 11 }}>{count}</span>
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {topClusters.length > 0 && (
+              <div>
+                <div className="section-label" style={{ margin: "0 0 8px" }}>Collapsed clusters</div>
+                <div className="center gap6 wrap">
+                  {topClusters.map((c) => (
+                    <span key={c.id} className="chip">{c.label}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {daily.length > 0 && (
+              <div>
+                <div className="section-label" style={{ margin: "0 0 8px" }}>Last 7 days</div>
+                <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(7, daily.length)}, 1fr)`, gap: 6 }}>
+                  {[...daily].reverse().map((d) => (
+                    <div key={d.day} className="card" style={{ padding: "8px 6px", background: "var(--surface-inset)", textAlign: "center" }}>
+                      <div className="mono faint" style={{ fontSize: 10 }}>{d.day.slice(5)}</div>
+                      <div style={{ fontWeight: 650, fontSize: 14, marginTop: 2 }}>{d.email_count}</div>
+                      <div className="faint" style={{ fontSize: 10 }}>{d.action_count} act</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
       <div className="grid mt18" style={{ gridTemplateColumns: "1.55fr 1fr", alignItems: "start" }}>
         <div className="grid" style={{ gap: "var(--gap)" }}>
           <Card>
@@ -171,12 +274,24 @@ export default async function DashboardPage() {
                         <span className="row-title ellip">{ib.email}</span>
                         <StatusBadge status={ib.status} pulse={syncing} />
                       </div>
-                      <div className="row-sub">{ib.type.toUpperCase()} · <span className="mono">{ib.last_sync_at ? new Date(ib.last_sync_at).toLocaleDateString() : "never synced"}</span></div>
+                      <div className="row-sub">
+                        {ib.type.toUpperCase()} ·{" "}
+                        <span className="mono">
+                          {ib.history_complete
+                            ? `${ib.history_synced_count.toLocaleString()} indexed`
+                            : `${ib.history_synced_count.toLocaleString()} / ${ib.history_target.toLocaleString()} history`}
+                        </span>
+                        {" · "}
+                        <span className="mono">{ib.last_sync_at ? new Date(ib.last_sync_at).toLocaleDateString() : "never synced"}</span>
+                      </div>
                     </div>
                     {ib.status === "error" ? (
                       <Link href="/connect"><Btn variant="danger" size="xs" icon="alert">Fix</Btn></Link>
                     ) : (
-                      <SyncButton target={{ id: ib.id, email: ib.email }} />
+                      <SyncButton
+                        target={{ id: ib.id, email: ib.email }}
+                        label={ib.history_complete ? "Sync" : "Continue"}
+                      />
                     )}
                   </div>
                 )

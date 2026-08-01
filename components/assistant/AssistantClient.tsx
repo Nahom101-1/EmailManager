@@ -79,16 +79,56 @@ export function AssistantClient({
     const history = msgs.map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }))
     setMsgs((m) => [...m, { role: "user", text: q }])
     setBusy(true)
+    // Add placeholder AI message so the bubble appears immediately
+    setMsgs((m) => [...m, { role: "ai", text: "" }])
+
     try {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "chat", message: q, history }),
       })
-      const data = await res.json()
-      setMsgs((m) => [...m, { role: "ai", text: data.text ?? "Something went wrong." }])
+
+      // Non-streaming fallback (live: false)
+      const ct = res.headers.get("content-type") ?? ""
+      if (ct.includes("application/json")) {
+        const data = await res.json()
+        setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: data.text ?? "Something went wrong." }])
+        return
+      }
+
+      // SSE streaming
+      const reader = res.body!.getReader()
+      const dec = new TextDecoder()
+      let buf = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split("\n")
+        buf = lines.pop() ?? ""
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          try {
+            const evt = JSON.parse(line.slice(6)) as { type: string; text?: string }
+            if (evt.type === "delta" && evt.text) {
+              setMsgs((m) => {
+                const copy = [...m]
+                copy[copy.length - 1] = { role: "ai", text: (copy[copy.length - 1]?.text ?? "") + evt.text }
+                return copy
+              })
+            } else if (evt.type === "error") {
+              setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: evt.text ?? "Something went wrong." }])
+            }
+            // "done" and "progress" events: no action needed
+          } catch {
+            // ignore
+          }
+        }
+      }
     } catch {
-      setMsgs((m) => [...m, { role: "ai", text: "I couldn't reach the assistant just now. Try again." }])
+      setMsgs((m) => [...m.slice(0, -1), { role: "ai", text: "I couldn't reach the assistant just now. Try again." }])
     } finally {
       setBusy(false)
     }
@@ -96,12 +136,46 @@ export function AssistantClient({
 
   async function regenerate() {
     setBriefBusy(true)
+    let accumulated = ""
     try {
-      const res = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: "briefing" }) })
-      const data = await res.json()
-      if (data.text) setSummary(data.text)
+      const res = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "briefing" }),
+      })
+
+      const ct = res.headers.get("content-type") ?? ""
+      if (ct.includes("application/json")) {
+        const data = await res.json()
+        if (data.text) setSummary(data.text)
+        return
+      }
+
+      const reader = res.body!.getReader()
+      const dec = new TextDecoder()
+      let buf = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split("\n")
+        buf = lines.pop() ?? ""
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          try {
+            const evt = JSON.parse(line.slice(6)) as { type: string; text?: string }
+            if (evt.type === "delta" && evt.text) {
+              accumulated += evt.text
+              setSummary(accumulated)
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
     } catch {
-      /* keep summary */
+      /* keep existing summary */
     } finally {
       setBriefBusy(false)
     }

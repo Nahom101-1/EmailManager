@@ -1,13 +1,10 @@
 /**
- * Hybrid search: FTS5 keyword precision + embedding cosine recall.
+ * Hybrid search: FTS5 keyword precision + cached embedding cosine recall.
  */
 
-import { cosineSimilarity, embedText } from "@/lib/ai/embeddings"
-import {
-  ftsSearchEmails,
-  listAllEmbeddings,
-  searchSubscriptionsAccounts,
-} from "@/lib/db/intelligence"
+import { embedText } from "@/lib/ai/embeddings"
+import { searchCachedVectors } from "@/lib/ai/vector-cache"
+import { ftsSearchEmails, searchSubscriptionsAccounts } from "@/lib/db/intelligence"
 
 export interface HybridEmailHit {
   emailId: string
@@ -40,26 +37,12 @@ export async function hybridSearchEmails(
   const ftsHits = ftsSearchEmails(q, limit * 2)
   const ftsScores = new Map<string, { hit: (typeof ftsHits)[0]; score: number }>()
   ftsHits.forEach((hit, idx) => {
-    // bm25 is lower-is-better; invert into a 0..1-ish score.
     const score = 1 / (1 + Math.max(0, hit.rank + 3)) + (ftsHits.length - idx) * 0.01
     ftsScores.set(hit.email_id, { hit, score })
   })
 
   const { vector } = await embedText(q)
-  const embeddings = listAllEmbeddings()
-  const vectorHits = embeddings
-    .map((e) => ({
-      emailId: e.email_id,
-      subject: e.subject,
-      snippet: e.snippet,
-      fromAddress: e.from_address,
-      date: e.date,
-      intent: e.intent,
-      score: cosineSimilarity(vector, e.vector),
-    }))
-    .filter((h) => h.score > 0.25)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit * 2)
+  const vectorHits = searchCachedVectors(vector, limit * 2, 0.25)
 
   const merged = new Map<string, HybridEmailHit>()
 

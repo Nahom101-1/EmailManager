@@ -1,5 +1,5 @@
 /**
- * Persistence for email embeddings, intents, clusters, extracts, and FTS.
+ * Persistence for email embeddings, intents, clusters, extracts, FTS, and overview rollups.
  */
 
 import { getDb, getLocalUserId } from "@/lib/db/local"
@@ -38,11 +38,48 @@ export interface StoredIntelligence {
   updated_at: string
 }
 
+/** Emails missing embeddings or intelligence rows, newest first. */
+export function listEmailsNeedingIntelligence(
+  providerId: string,
+  limit = 300
+): EmailForIntelligence[] {
+  return getDb()
+    .prepare(
+      `
+      select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
+             e.date, e.labels, e.headers, e.gmail_message_id
+      from emails e
+      left join email_embeddings emb on emb.email_id = e.id
+      left join email_intelligence i on i.email_id = e.id
+      where e.provider_id = ? and (emb.email_id is null or i.email_id is null)
+      order by coalesce(e.date, e.created_at) desc
+      limit ?
+    `
+    )
+    .all(providerId, limit) as EmailForIntelligence[]
+}
+
+export function countEmailsNeedingIntelligence(providerId: string): number {
+  return (
+    getDb()
+      .prepare(
+        `
+      select count(*) as count
+      from emails e
+      left join email_embeddings emb on emb.email_id = e.id
+      left join email_intelligence i on i.email_id = e.id
+      where e.provider_id = ? and (emb.email_id is null or i.email_id is null)
+    `
+      )
+      .get(providerId) as { count: number }
+  ).count
+}
+
+/** @deprecated use listEmailsNeedingIntelligence */
 export function listEmailsNeedingEmbed(providerId: string, emailIds?: string[]): EmailForIntelligence[] {
-  const db = getDb()
   if (emailIds && emailIds.length > 0) {
     const placeholders = emailIds.map(() => "?").join(",")
-    return db
+    return getDb()
       .prepare(
         `
         select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
@@ -54,20 +91,7 @@ export function listEmailsNeedingEmbed(providerId: string, emailIds?: string[]):
       )
       .all(providerId, ...emailIds) as EmailForIntelligence[]
   }
-
-  return db
-    .prepare(
-      `
-      select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
-             e.date, e.labels, e.headers, e.gmail_message_id
-      from emails e
-      left join email_embeddings emb on emb.email_id = e.id
-      where e.provider_id = ? and emb.email_id is null
-      order by coalesce(e.date, e.created_at) desc
-      limit 200
-    `
-    )
-    .all(providerId) as EmailForIntelligence[]
+  return listEmailsNeedingIntelligence(providerId, 300)
 }
 
 export function listEmailsByIds(ids: string[]): EmailForIntelligence[] {
@@ -110,6 +134,30 @@ export function upsertEmailEmbedding(input: {
       vectorToBuffer(input.vector),
       new Date().toISOString()
     )
+}
+
+export function upsertEmailEmbeddingsBatch(
+  items: Array<{ emailId: string; model: string; dims: number; vector: Float32Array }>
+) {
+  if (items.length === 0) return
+  const stmt = getDb().prepare(
+    `
+    insert into email_embeddings (email_id, model, dims, vector, updated_at)
+    values (?, ?, ?, ?, ?)
+    on conflict(email_id) do update set
+      model = excluded.model,
+      dims = excluded.dims,
+      vector = excluded.vector,
+      updated_at = excluded.updated_at
+  `
+  )
+  const now = new Date().toISOString()
+  const tx = getDb().transaction((rows: typeof items) => {
+    for (const item of rows) {
+      stmt.run(item.emailId, item.model, item.dims, vectorToBuffer(item.vector), now)
+    }
+  })
+  tx(items)
 }
 
 export function getEmailEmbedding(emailId: string): {
@@ -243,22 +291,74 @@ export function updateEmailClusterIds(assignments: Array<{ emailId: string; clus
   tx(assignments)
 }
 
-export function replaceClusters(clusters: EmailCluster[]) {
+export function replaceClusters(
+  clusters: Array<EmailCluster & { sender?: string; centroid?: Float32Array | null }>
+) {
   const db = getDb()
   const clear = db.prepare("delete from email_clusters")
   const insert = db.prepare(
     `
-    insert into email_clusters (id, intent, label, size, representative_id, member_ids, updated_at)
-    values (?, ?, ?, ?, ?, ?, ?)
+    insert into email_clusters (id, intent, label, size, representative_id, member_ids, sender, centroid, updated_at)
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   )
   const now = new Date().toISOString()
   db.transaction(() => {
     clear.run()
     for (const c of clusters) {
-      insert.run(c.id, c.intent, c.label, c.size, c.representativeId, JSON.stringify(c.memberIds), now)
+      insert.run(
+        c.id,
+        c.intent,
+        c.label,
+        c.size,
+        c.representativeId,
+        JSON.stringify(c.memberIds),
+        c.sender ?? null,
+        c.centroid ? vectorToBuffer(c.centroid) : null,
+        now
+      )
     }
   })()
+}
+
+export function loadMutableClusters(): Array<{
+  id: string
+  intent: EmailIntent
+  sender: string
+  centroid: Float32Array
+  memberIds: string[]
+  representativeId: string
+  label: string
+}> {
+  const rows = getDb()
+    .prepare(
+      `
+      select id, intent, label, size, representative_id, member_ids, sender, centroid
+      from email_clusters
+    `
+    )
+    .all() as Array<{
+    id: string
+    intent: EmailIntent
+    label: string
+    size: number
+    representative_id: string
+    member_ids: string
+    sender: string | null
+    centroid: Buffer | null
+  }>
+
+  return rows
+    .filter((r) => r.centroid)
+    .map((r) => ({
+      id: r.id,
+      intent: r.intent,
+      sender: r.sender ?? "unknown",
+      centroid: bufferToVector(r.centroid!),
+      memberIds: safeJson(r.member_ids, [] as string[]),
+      representativeId: r.representative_id,
+      label: r.label,
+    }))
 }
 
 export function listClusters(limit = 40): EmailCluster[] {
@@ -421,12 +521,15 @@ export function ftsSearchEmails(
       rank: number
     }>
   } catch {
-    // Malformed FTS query — return empty rather than throw.
     return []
   }
 }
 
-export function getDailyDigestRows(sinceIso: string, userId = getLocalUserId()) {
+export function getDailyDigestRows(
+  sinceIso: string,
+  userId = getLocalUserId(),
+  limit = 80
+) {
   return getDb()
     .prepare(
       `
@@ -448,9 +551,10 @@ export function getDailyDigestRows(sinceIso: string, userId = getLocalUserId()) 
           else 6
         end,
         i.intent_confidence desc
+      limit ?
     `
     )
-    .all(userId, sinceIso) as Array<{
+    .all(userId, sinceIso, limit) as Array<{
     intent: EmailIntent
     uncertain: number
     vendor: string | null
@@ -520,6 +624,322 @@ export function searchSubscriptionsAccounts(
   ].slice(0, limit)
 }
 
+export interface OverviewStats {
+  user_id: string
+  email_count: number
+  embedded_count: number
+  classified_count: number
+  intent_counts: Record<string, number>
+  money_event_count: number
+  action_count: number
+  cluster_count: number
+  updated_at: string
+}
+
+export interface OverviewDailyRow {
+  day: string
+  intent_counts: Record<string, number>
+  money_sum: number
+  money_event_count: number
+  action_count: number
+  email_count: number
+}
+
+const ACTION_INTENTS = new Set([
+  "security",
+  "action_required",
+  "needs_reply",
+  "renewal",
+  "trial",
+])
+
+export function refreshOverviewRollups(userId = getLocalUserId()): OverviewStats {
+  const db = getDb()
+  const emailCount = (
+    db
+      .prepare(
+        `
+      select count(*) as count from emails e
+      join providers p on p.id = e.provider_id where p.user_id = ?
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
+
+  const embeddedCount = (
+    db
+      .prepare(
+        `
+      select count(*) as count from email_embeddings emb
+      join emails e on e.id = emb.email_id
+      join providers p on p.id = e.provider_id where p.user_id = ?
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
+
+  const classifiedCount = (
+    db
+      .prepare(
+        `
+      select count(*) as count from email_intelligence i
+      join emails e on e.id = i.email_id
+      join providers p on p.id = e.provider_id where p.user_id = ?
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
+
+  const intentRows = db
+    .prepare(
+      `
+      select i.intent, count(*) as count
+      from email_intelligence i
+      join emails e on e.id = i.email_id
+      join providers p on p.id = e.provider_id
+      where p.user_id = ?
+      group by i.intent
+    `
+    )
+    .all(userId) as Array<{ intent: string; count: number }>
+
+  const intentCounts: Record<string, number> = {}
+  for (const row of intentRows) intentCounts[row.intent] = row.count
+
+  const moneyEventCount = (
+    db
+      .prepare(
+        `
+      select count(*) as count from email_intelligence i
+      join emails e on e.id = i.email_id
+      join providers p on p.id = e.provider_id
+      where p.user_id = ? and i.amount is not null
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
+
+  const actionCount = (
+    db
+      .prepare(
+        `
+      select count(*) as count from email_intelligence i
+      join emails e on e.id = i.email_id
+      join providers p on p.id = e.provider_id
+      where p.user_id = ?
+        and (i.uncertain = 1 or i.intent in ('security','action_required','needs_reply','renewal','trial'))
+    `
+      )
+      .get(userId) as { count: number }
+  ).count
+
+  const clusterCount = (
+    db.prepare("select count(*) as count from email_clusters").get() as { count: number }
+  ).count
+
+  const now = new Date().toISOString()
+  db.prepare(
+    `
+    insert into overview_stats (
+      user_id, email_count, embedded_count, classified_count, intent_counts_json,
+      money_event_count, action_count, cluster_count, updated_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    on conflict(user_id) do update set
+      email_count = excluded.email_count,
+      embedded_count = excluded.embedded_count,
+      classified_count = excluded.classified_count,
+      intent_counts_json = excluded.intent_counts_json,
+      money_event_count = excluded.money_event_count,
+      action_count = excluded.action_count,
+      cluster_count = excluded.cluster_count,
+      updated_at = excluded.updated_at
+  `
+  ).run(
+    userId,
+    emailCount,
+    embeddedCount,
+    classifiedCount,
+    JSON.stringify(intentCounts),
+    moneyEventCount,
+    actionCount,
+    clusterCount,
+    now
+  )
+
+  const dailyRows = db
+    .prepare(
+      `
+      select substr(coalesce(e.date, e.created_at), 1, 10) as day,
+             i.intent, i.amount, i.uncertain
+      from email_intelligence i
+      join emails e on e.id = i.email_id
+      join providers p on p.id = e.provider_id
+      where p.user_id = ?
+        and coalesce(e.date, e.created_at) >= date('now', '-30 day')
+    `
+    )
+    .all(userId) as Array<{
+    day: string
+    intent: string
+    amount: number | null
+    uncertain: number
+  }>
+
+  const byDay = new Map<
+    string,
+    {
+      intent_counts: Record<string, number>
+      money_sum: number
+      money_event_count: number
+      action_count: number
+      email_count: number
+    }
+  >()
+
+  for (const row of dailyRows) {
+    if (!row.day) continue
+    let bucket = byDay.get(row.day)
+    if (!bucket) {
+      bucket = {
+        intent_counts: {},
+        money_sum: 0,
+        money_event_count: 0,
+        action_count: 0,
+        email_count: 0,
+      }
+      byDay.set(row.day, bucket)
+    }
+    bucket.email_count += 1
+    bucket.intent_counts[row.intent] = (bucket.intent_counts[row.intent] ?? 0) + 1
+    if (row.amount != null) {
+      bucket.money_sum += row.amount
+      bucket.money_event_count += 1
+    }
+    if (row.uncertain || ACTION_INTENTS.has(row.intent)) bucket.action_count += 1
+  }
+
+  const upsertDay = db.prepare(
+    `
+    insert into overview_daily (
+      user_id, day, intent_counts_json, money_sum, money_event_count, action_count, email_count, updated_at
+    ) values (?, ?, ?, ?, ?, ?, ?, ?)
+    on conflict(user_id, day) do update set
+      intent_counts_json = excluded.intent_counts_json,
+      money_sum = excluded.money_sum,
+      money_event_count = excluded.money_event_count,
+      action_count = excluded.action_count,
+      email_count = excluded.email_count,
+      updated_at = excluded.updated_at
+  `
+  )
+
+  db.transaction(() => {
+    for (const [day, bucket] of byDay) {
+      upsertDay.run(
+        userId,
+        day,
+        JSON.stringify(bucket.intent_counts),
+        bucket.money_sum,
+        bucket.money_event_count,
+        bucket.action_count,
+        bucket.email_count,
+        now
+      )
+    }
+  })()
+
+  return {
+    user_id: userId,
+    email_count: emailCount,
+    embedded_count: embeddedCount,
+    classified_count: classifiedCount,
+    intent_counts: intentCounts,
+    money_event_count: moneyEventCount,
+    action_count: actionCount,
+    cluster_count: clusterCount,
+    updated_at: now,
+  }
+}
+
+export function getOverviewStats(userId = getLocalUserId()): OverviewStats | null {
+  const row = getDb()
+    .prepare("select * from overview_stats where user_id = ?")
+    .get(userId) as
+    | {
+        user_id: string
+        email_count: number
+        embedded_count: number
+        classified_count: number
+        intent_counts_json: string
+        money_event_count: number
+        action_count: number
+        cluster_count: number
+        updated_at: string
+      }
+    | undefined
+
+  if (!row) return null
+  return {
+    user_id: row.user_id,
+    email_count: row.email_count,
+    embedded_count: row.embedded_count,
+    classified_count: row.classified_count,
+    intent_counts: safeJson(row.intent_counts_json, {} as Record<string, number>),
+    money_event_count: row.money_event_count,
+    action_count: row.action_count,
+    cluster_count: row.cluster_count,
+    updated_at: row.updated_at,
+  }
+}
+
+export function listOverviewDaily(userId = getLocalUserId(), limit = 14): OverviewDailyRow[] {
+  const rows = getDb()
+    .prepare(
+      `
+      select day, intent_counts_json, money_sum, money_event_count, action_count, email_count
+      from overview_daily
+      where user_id = ?
+      order by day desc
+      limit ?
+    `
+    )
+    .all(userId, limit) as Array<{
+    day: string
+    intent_counts_json: string
+    money_sum: number
+    money_event_count: number
+    action_count: number
+    email_count: number
+  }>
+
+  return rows.map((r) => ({
+    day: r.day,
+    intent_counts: safeJson(r.intent_counts_json, {} as Record<string, number>),
+    money_sum: r.money_sum,
+    money_event_count: r.money_event_count,
+    action_count: r.action_count,
+    email_count: r.email_count,
+  }))
+}
+
+export function getClusterRebuildDebt(): number {
+  const raw = getDb().prepare("select value from settings where key = ?").get("cluster_rebuild_debt") as
+    | { value: string }
+    | undefined
+  return raw ? Number(raw.value) || 0 : 0
+}
+
+export function setClusterRebuildDebt(n: number) {
+  getDb()
+    .prepare(
+      `
+      insert into settings (key, value, updated_at) values (?, ?, ?)
+      on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at
+    `
+    )
+    .run("cluster_rebuild_debt", String(n), new Date().toISOString())
+}
+
 export interface UpcomingBill {
   emailId: string
   vendor: string | null
@@ -530,7 +950,6 @@ export interface UpcomingBill {
   intent: string
 }
 
-/** Returns renewal/receipt emails with a due_date within the next `days` days. */
 export function getUpcomingBills(days = 30): UpcomingBill[] {
   const cutoff = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
   const today = new Date().toISOString().slice(0, 10)
@@ -552,7 +971,6 @@ export interface EndingTrial {
   due_date: string
 }
 
-/** Returns trial emails with a due_date within the next `days` days. */
 export function getEndingTrials(days = 14): EndingTrial[] {
   const cutoff = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
   const today = new Date().toISOString().slice(0, 10)

@@ -151,9 +151,8 @@ export async function syncGmailProvider(input: {
       historyComplete = hitTarget || exhausted
       if (historyComplete) nextToken = null
     } else {
-      // Incremental mode: don't accumulate page tokens into a deep crawl.
+      // Incremental mode: pull newest pages; keep crawl counters stable.
       nextToken = null
-      historySyncedCount = Math.max(historySyncedCount, listed.messages.length)
     }
 
     updateProviderHistoryCursor({

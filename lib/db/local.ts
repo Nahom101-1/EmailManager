@@ -24,6 +24,10 @@ export interface LocalProvider {
   last_sync_at: string | null
   error_message: string | null
   created_at: string
+  history_page_token: string | null
+  history_synced_count: number
+  history_complete: boolean
+  history_target: number
 }
 
 export interface GoogleAccount {
@@ -273,6 +277,31 @@ export function updateProviderSyncStatus(input: {
       status: input.status,
       lastSyncAt: input.lastSyncAt ?? null,
       errorMessage: input.errorMessage ?? null,
+    })
+}
+
+export function updateProviderHistoryCursor(input: {
+  providerId: string
+  historyPageToken: string | null
+  historySyncedCount: number
+  historyComplete: boolean
+  historyTarget?: number
+}) {
+  getDb()
+    .prepare(`
+      update providers
+      set history_page_token = @historyPageToken,
+          history_synced_count = @historySyncedCount,
+          history_complete = @historyComplete,
+          history_target = coalesce(@historyTarget, history_target)
+      where id = @providerId
+    `)
+    .run({
+      providerId: input.providerId,
+      historyPageToken: input.historyPageToken,
+      historySyncedCount: input.historySyncedCount,
+      historyComplete: input.historyComplete ? 1 : 0,
+      historyTarget: input.historyTarget ?? null,
     })
 }
 
@@ -947,6 +976,8 @@ export function resetLocalData() {
   const database = getDb()
   const wipe = database.transaction(() => {
     database.prepare("delete from sync_runs").run()
+    database.prepare("delete from overview_daily").run()
+    database.prepare("delete from overview_stats").run()
     database.prepare("delete from email_clusters").run()
     database.prepare("delete from email_intelligence").run()
     database.prepare("delete from email_embeddings").run()
@@ -1105,11 +1136,19 @@ function migrate(database: Database.Database) {
       size integer not null default 1,
       representative_id text,
       member_ids text not null default '[]',
+      sender text,
+      centroid blob,
       updated_at text not null default current_timestamp
     );
   `)
 
-  ensureColumns(database, "providers", [["username", "text"]])
+  ensureColumns(database, "providers", [
+    ["username", "text"],
+    ["history_page_token", "text"],
+    ["history_synced_count", "integer not null default 0"],
+    ["history_complete", "integer not null default 0"],
+    ["history_target", "integer not null default 2000"],
+  ])
 
   ensureColumns(database, "emails", [
     ["gmail_message_id", "text"],
@@ -1122,6 +1161,7 @@ function migrate(database: Database.Database) {
   migrateSubscriptionsTable(database)
   migrateAccountsTable(database)
   migrateEmailIntelligence(database)
+  migrateOverviewTables(database)
 
   database.exec(`
     create unique index if not exists subscriptions_unique_company
@@ -1135,6 +1175,24 @@ function migrate(database: Database.Database) {
 
     create index if not exists email_intelligence_cluster_idx
       on email_intelligence(cluster_id);
+
+    create index if not exists emails_provider_date_idx
+      on emails(provider_id, date);
+
+    create index if not exists emails_provider_created_idx
+      on emails(provider_id, created_at);
+
+    create index if not exists providers_user_idx
+      on providers(user_id);
+
+    create index if not exists subscriptions_user_idx
+      on subscriptions(user_id);
+
+    create index if not exists accounts_user_idx
+      on accounts(user_id);
+
+    create index if not exists sync_runs_provider_started_idx
+      on sync_runs(provider_id, started_at);
   `)
 
   database.exec(`
@@ -1178,9 +1236,16 @@ function migrateEmailIntelligence(database: Database.Database) {
       size integer not null default 1,
       representative_id text,
       member_ids text not null default '[]',
+      sender text,
+      centroid blob,
       updated_at text not null default current_timestamp
     );
   `)
+
+  ensureColumns(database, "email_clusters", [
+    ["sender", "text"],
+    ["centroid", "blob"],
+  ])
 
   // FTS5 index for hybrid keyword search. content='' means we maintain it manually.
   const fts = database
@@ -1199,6 +1264,34 @@ function migrateEmailIntelligence(database: Database.Database) {
       );
     `)
   }
+}
+
+function migrateOverviewTables(database: Database.Database) {
+  database.exec(`
+    create table if not exists overview_stats (
+      user_id text primary key,
+      email_count integer not null default 0,
+      embedded_count integer not null default 0,
+      classified_count integer not null default 0,
+      intent_counts_json text not null default '{}',
+      money_event_count integer not null default 0,
+      action_count integer not null default 0,
+      cluster_count integer not null default 0,
+      updated_at text not null default current_timestamp
+    );
+
+    create table if not exists overview_daily (
+      user_id text not null,
+      day text not null,
+      intent_counts_json text not null default '{}',
+      money_sum real not null default 0,
+      money_event_count integer not null default 0,
+      action_count integer not null default 0,
+      email_count integer not null default 0,
+      updated_at text not null default current_timestamp,
+      primary key (user_id, day)
+    );
+  `)
 }
 
 function ensureColumns(
@@ -1380,11 +1473,21 @@ function migrateAccountsTable(database: Database.Database) {
 /* ------------------------------------------------------------------ */
 
 function normalizeProvider(
-  provider: Omit<LocalProvider, "tls"> & { tls: number | boolean | null }
+  provider: Omit<LocalProvider, "tls" | "history_complete" | "history_synced_count" | "history_target" | "history_page_token"> & {
+    tls: number | boolean | null
+    history_page_token?: string | null
+    history_synced_count?: number | null
+    history_complete?: number | boolean | null
+    history_target?: number | null
+  }
 ): LocalProvider {
   return {
     ...provider,
     tls: provider.tls == null ? null : Boolean(provider.tls),
+    history_page_token: provider.history_page_token ?? null,
+    history_synced_count: provider.history_synced_count ?? 0,
+    history_complete: Boolean(provider.history_complete),
+    history_target: provider.history_target ?? 2000,
   }
 }
 

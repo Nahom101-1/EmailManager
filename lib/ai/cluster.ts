@@ -99,3 +99,82 @@ export function clusterEmails(
     }
   })
 }
+
+export interface MutableCluster {
+  id: string
+  intent: EmailIntent
+  sender: string
+  centroid: Float32Array
+  memberIds: string[]
+  representativeId: string
+  label: string
+}
+
+/** Assign new emails into existing clusters; creates new clusters when needed. */
+export function assignToClusters(
+  existing: MutableCluster[],
+  emails: ClusterableEmail[],
+  threshold = DEFAULT_THRESHOLD
+): { clusters: MutableCluster[]; assignments: Array<{ emailId: string; clusterId: string }> } {
+  const clusters: MutableCluster[] = existing.map((c) => ({
+    ...c,
+    centroid: new Float32Array(c.centroid),
+    memberIds: [...c.memberIds],
+  }))
+  const assignments: Array<{ emailId: string; clusterId: string }> = []
+
+  for (const email of emails) {
+    const sender = senderKey(email.fromAddress)
+    let bestIdx = -1
+    let bestScore = -1
+
+    for (let i = 0; i < clusters.length; i++) {
+      const c = clusters[i]
+      if (c.intent !== email.intent || c.sender !== sender) continue
+      const score = cosineSimilarity(email.vector, c.centroid)
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+
+    if (bestIdx >= 0 && bestScore >= threshold) {
+      const c = clusters[bestIdx]
+      c.memberIds.push(email.id)
+      const n = c.memberIds.length
+      for (let d = 0; d < c.centroid.length; d++) {
+        c.centroid[d] = c.centroid[d] * ((n - 1) / n) + email.vector[d] / n
+      }
+      c.label =
+        n > 1
+          ? `${c.intent} · ${c.sender} (${n})`
+          : `${c.intent} · ${email.subject ?? c.sender}`
+      assignments.push({ emailId: email.id, clusterId: c.id })
+    } else {
+      const id = `cluster-${Date.now().toString(36)}-${sender}-${email.intent}-${email.id.slice(0, 8)}`
+      clusters.push({
+        id,
+        intent: email.intent,
+        sender,
+        centroid: new Float32Array(email.vector),
+        memberIds: [email.id],
+        representativeId: email.id,
+        label: `${email.intent} · ${email.subject ?? sender}`,
+      })
+      assignments.push({ emailId: email.id, clusterId: id })
+    }
+  }
+
+  return { clusters, assignments }
+}
+
+export function clusterToEmailCluster(c: MutableCluster): EmailCluster {
+  return {
+    id: c.id,
+    intent: c.intent,
+    memberIds: c.memberIds,
+    representativeId: c.representativeId,
+    label: c.label,
+    size: c.memberIds.length,
+  }
+}

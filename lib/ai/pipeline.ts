@@ -1,36 +1,46 @@
 /**
- * Post-sync email intelligence pipeline:
- * embed → intent → extract (high-signal) → cluster → FTS index.
+ * Incremental post-sync email intelligence:
+ * embed (batched) → intent → extract → incremental cluster → FTS → overview rollups.
  */
 
 import {
   emailEmbedText,
-  embedText,
+  embedTexts,
   EMBEDDING_DIMS,
 } from "@/lib/ai/embeddings"
 import { classifyIntent, warmIntentPrototypes } from "@/lib/ai/intent"
-import { clusterEmails } from "@/lib/ai/cluster"
-import { extractFields, isHighSignal } from "@/lib/ai/extract"
-import { getAiSettings } from "@/lib/db/local"
 import {
+  assignToClusters,
+  clusterToEmailCluster,
+  type ClusterableEmail,
+} from "@/lib/ai/cluster"
+import { extractFields, isHighSignal } from "@/lib/ai/extract"
+import { invalidateEmbeddingCache } from "@/lib/ai/vector-cache"
+import { getAiSettings, getGoogleAccount, getLocalUserId } from "@/lib/db/local"
+import { getValidGoogleAccessToken } from "@/lib/google/oauth"
+import {
+  countEmailsNeedingIntelligence,
+  getClusterRebuildDebt,
   getEmailEmbedding,
   listAllEmbeddings,
-  listEmailsByIds,
-  listEmailsNeedingEmbed,
+  listEmailsNeedingIntelligence,
+  loadMutableClusters,
+  refreshOverviewRollups,
   replaceClusters,
+  setClusterRebuildDebt,
   updateEmailBodyText,
   updateEmailClusterIds,
-  upsertEmailEmbedding,
+  upsertEmailEmbeddingsBatch,
   upsertEmailFts,
   upsertEmailIntelligence,
   type EmailForIntelligence,
 } from "@/lib/db/intelligence"
-import { getValidGoogleAccessToken } from "@/lib/google/oauth"
-import { getGoogleAccount } from "@/lib/db/local"
 
 const GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 const MAX_BODY_FETCH = 8
 const MAX_LLM_EXTRACT = 3
+const MAX_PER_RUN = 300
+const FULL_REBUILD_EVERY = 200
 
 function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback
@@ -119,7 +129,7 @@ async function maybeFetchBodies(input: {
         updateEmailBodyText(email.id, body)
         email.body_text = body
       }
-      await new Promise((r) => setTimeout(r, 120))
+      await new Promise((r) => setTimeout(r, 80))
     }
   } catch (err) {
     console.warn("[pipeline] body fetch skipped:", err)
@@ -129,26 +139,23 @@ async function maybeFetchBodies(input: {
 export async function runEmailIntelligence(input: {
   providerId: string
   origin: string
-  emailIds?: string[]
-}): Promise<{ embedded: number; classified: number; clusters: number }> {
+}): Promise<{ embedded: number; classified: number; clusters: number; backlogRemaining: number }> {
   const settings = getAiSettings()
   const allowLlm = settings.cloudAiEnabled
 
-  // Best-effort: upgrade prototype vectors with the transformer model.
   void warmIntentPrototypes().catch(() => {})
 
-  let emails = listEmailsNeedingEmbed(input.providerId, input.emailIds)
-  // Also reprocess explicitly requested emails even if already embedded.
-  if (input.emailIds && input.emailIds.length > 0) {
-    const existing = new Set(emails.map((e) => e.id))
-    const extras = listEmailsByIds(input.emailIds).filter((e) => !existing.has(e.id))
-    emails = [...emails, ...extras]
-  }
+  const emails = listEmailsNeedingIntelligence(input.providerId, MAX_PER_RUN)
+  const backlogBefore = countEmailsNeedingIntelligence(input.providerId)
 
-  if (emails.length === 0 && (!input.emailIds || input.emailIds.length === 0)) {
-    // Still refresh clusters from existing embeddings.
-    const clusters = rebuildClusters()
-    return { embedded: 0, classified: 0, clusters }
+  if (emails.length === 0) {
+    refreshOverviewRollups(getLocalUserId())
+    return {
+      embedded: 0,
+      classified: 0,
+      clusters: loadMutableClusters().length,
+      backlogRemaining: 0,
+    }
   }
 
   await maybeFetchBodies({
@@ -157,30 +164,37 @@ export async function runEmailIntelligence(input: {
     emails,
   })
 
-  let embedded = 0
+  // Batch-embed emails that still lack vectors.
+  const needEmbed = emails.filter((e) => !getEmailEmbedding(e.id))
+  const texts = needEmbed.map((e) =>
+    emailEmbedText({
+      from: e.from_address,
+      subject: e.subject,
+      snippet: e.snippet,
+      bodyText: e.body_text,
+    })
+  )
+  const embeddedVectors = texts.length > 0 ? await embedTexts(texts) : []
+  if (embeddedVectors.length > 0) {
+    upsertEmailEmbeddingsBatch(
+      needEmbed.map((e, i) => ({
+        emailId: e.id,
+        model: embeddedVectors[i].model,
+        dims: embeddedVectors[i].vector.length || EMBEDDING_DIMS,
+        vector: embeddedVectors[i].vector,
+      }))
+    )
+    invalidateEmbeddingCache()
+  }
+
   let classified = 0
   let llmExtracts = 0
+  const newlyClassified: ClusterableEmail[] = []
 
   for (const email of emails) {
-    const text = emailEmbedText({
-      from: email.from_address,
-      subject: email.subject,
-      snippet: email.snippet,
-      bodyText: email.body_text,
-    })
-
-    let vector = getEmailEmbedding(email.id)?.vector
-    if (!vector) {
-      const result = await embedText(text)
-      upsertEmailEmbedding({
-        emailId: email.id,
-        model: result.model,
-        dims: result.vector.length || EMBEDDING_DIMS,
-        vector: result.vector,
-      })
-      vector = result.vector
-      embedded += 1
-    }
+    const emb = getEmailEmbedding(email.id)
+    if (!emb) continue
+    const vector = emb.vector
 
     const labels = safeJsonParse<string[]>(email.labels, [])
     const headers = safeJsonParse<Record<string, string>>(email.headers, {})
@@ -225,14 +239,60 @@ export async function runEmailIntelligence(input: {
       bodyText: email.body_text,
     })
 
+    newlyClassified.push({
+      id: email.id,
+      vector,
+      intent: intentResult.intent,
+      fromAddress: email.from_address,
+      subject: email.subject,
+      date: email.date,
+    })
     classified += 1
   }
 
-  const clusters = rebuildClusters()
-  return { embedded, classified, clusters }
+  const clusterCount = updateClustersIncremental(newlyClassified)
+  refreshOverviewRollups(getLocalUserId())
+  invalidateEmbeddingCache()
+
+  const backlogRemaining = Math.max(0, backlogBefore - emails.length)
+
+  return {
+    embedded: needEmbed.length,
+    classified,
+    clusters: clusterCount,
+    backlogRemaining,
+  }
 }
 
-function rebuildClusters(): number {
+function updateClustersIncremental(newlyClassified: ClusterableEmail[]): number {
+  if (newlyClassified.length === 0) {
+    return loadMutableClusters().length
+  }
+
+  const debt = getClusterRebuildDebt() + newlyClassified.length
+  const existing = loadMutableClusters()
+
+  // Full rebuild when no clusters yet, missing centroids, or debt threshold hit.
+  if (existing.length === 0 || debt >= FULL_REBUILD_EVERY) {
+    const count = rebuildClustersFull()
+    setClusterRebuildDebt(0)
+    return count
+  }
+
+  const { clusters, assignments } = assignToClusters(existing, newlyClassified)
+  replaceClusters(
+    clusters.map((c) => ({
+      ...clusterToEmailCluster(c),
+      sender: c.sender,
+      centroid: c.centroid,
+    }))
+  )
+  updateEmailClusterIds(assignments)
+  setClusterRebuildDebt(debt)
+  return clusters.length
+}
+
+function rebuildClustersFull(): number {
   const embeddings = listAllEmbeddings()
   const clusterable = embeddings
     .filter((e) => e.intent)
@@ -245,15 +305,14 @@ function rebuildClusters(): number {
       date: e.date,
     }))
 
-  const clusters = clusterEmails(clusterable)
-  replaceClusters(clusters)
-
-  const assignments: Array<{ emailId: string; clusterId: string }> = []
-  for (const c of clusters) {
-    for (const emailId of c.memberIds) {
-      assignments.push({ emailId, clusterId: c.id })
-    }
-  }
+  const { clusters: mutable, assignments } = assignToClusters([], clusterable)
+  replaceClusters(
+    mutable.map((c) => ({
+      ...clusterToEmailCluster(c),
+      sender: c.sender,
+      centroid: c.centroid,
+    }))
+  )
   updateEmailClusterIds(assignments)
-  return clusters.length
+  return mutable.length
 }

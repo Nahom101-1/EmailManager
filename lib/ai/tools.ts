@@ -7,13 +7,15 @@ import {
   getCluster,
   getDailyDigestRows,
   getIntelligence,
+  getOverviewStats,
   listClusters,
   listIntelligenceByIntent,
+  listOverviewDaily,
   upsertEmailIntelligence,
+  getEmailEmbedding,
 } from "@/lib/db/intelligence"
 import { hybridSearchEmails } from "@/lib/ai/search"
 import { classifyIntent, EMAIL_INTENTS, type EmailIntent } from "@/lib/ai/intent"
-import { getEmailEmbedding } from "@/lib/db/intelligence"
 import { extractWithRules } from "@/lib/ai/extract"
 
 export const ASSISTANT_TOOLS = [
@@ -33,7 +35,7 @@ export const ASSISTANT_TOOLS = [
   {
     name: "get_daily_digest_inputs",
     description:
-      "Return compressed daily digest inputs: intent counts, money events, action items, clusters.",
+      "Return compressed daily digest inputs: corpus rollups, intent counts, money events, action items, clusters.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -121,15 +123,17 @@ export async function runAssistantTool(
     case "get_daily_digest_inputs": {
       const hours = Number(rawInput.hours ?? 24) || 24
       const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
-      const rows = getDailyDigestRows(since)
+      const overview = getOverviewStats()
+      const rows = getDailyDigestRows(since, undefined, 40)
+      const daily = listOverviewDaily(undefined, 7)
+
       const byIntent: Record<string, number> = {}
       const money: Array<Record<string, unknown>> = []
       const actions: Array<Record<string, unknown>> = []
-      const clustersSeen = new Set<string>()
 
       for (const row of rows) {
         byIntent[row.intent] = (byIntent[row.intent] ?? 0) + 1
-        if (row.amount != null) {
+        if (row.amount != null && money.length < 10) {
           money.push({
             vendor: row.vendor,
             amount: row.amount,
@@ -140,12 +144,13 @@ export async function runAssistantTool(
           })
         }
         if (
-          row.intent === "security" ||
-          row.intent === "action_required" ||
-          row.intent === "needs_reply" ||
-          row.intent === "renewal" ||
-          row.intent === "trial" ||
-          row.uncertain
+          actions.length < 10 &&
+          (row.intent === "security" ||
+            row.intent === "action_required" ||
+            row.intent === "needs_reply" ||
+            row.intent === "renewal" ||
+            row.intent === "trial" ||
+            row.uncertain)
         ) {
           actions.push({
             intent: row.intent,
@@ -156,19 +161,34 @@ export async function runAssistantTool(
             confidence: row.intent_confidence,
           })
         }
-        if (row.cluster_id) clustersSeen.add(row.cluster_id)
       }
 
-      const clusters = listClusters(15).filter((c) => clustersSeen.has(c.id) || c.size > 1)
+      const clusters = listClusters(10).filter((c) => c.size > 1)
 
       return JSON.stringify(
         {
           windowHours: hours,
-          totalClassified: rows.length,
-          byIntent,
-          actions: actions.slice(0, 10),
-          moneyEvents: money.slice(0, 10),
-          clusters: clusters.slice(0, 10).map((c) => ({
+          corpus: overview
+            ? {
+                emails: overview.email_count,
+                embedded: overview.embedded_count,
+                classified: overview.classified_count,
+                intents: overview.intent_counts,
+                moneyEvents: overview.money_event_count,
+                actions: overview.action_count,
+                clusters: overview.cluster_count,
+              }
+            : null,
+          windowIntentCounts: byIntent,
+          actions,
+          moneyEvents: money,
+          recentDays: daily.map((d) => ({
+            day: d.day,
+            emails: d.email_count,
+            actions: d.action_count,
+            money: d.money_event_count,
+          })),
+          clusters: clusters.map((c) => ({
             id: c.id,
             label: c.label,
             intent: c.intent,
@@ -309,62 +329,78 @@ export async function runAssistantTool(
   }
 }
 
-/** Compressed digest block for briefing context (no tool call needed). */
+/** Compressed digest block for briefing context — uses rollups + top-K. */
 export function buildDigestContext(hours = 24): string {
+  const overview = getOverviewStats()
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
-  const rows = getDailyDigestRows(since)
-  if (rows.length === 0) {
-    return "Email intelligence digest: no classified messages in the lookback window."
+  const rows = getDailyDigestRows(since, undefined, 40)
+  const clusters = listClusters(8).filter((c) => c.size > 1)
+
+  const lines: string[] = []
+
+  if (overview) {
+    lines.push(
+      `Corpus: ${overview.email_count} emails · ${overview.embedded_count} embedded · ${overview.classified_count} classified · ${overview.cluster_count} clusters.`
+    )
+    const intentStr = (Object.entries(overview.intent_counts) as Array<[string, number]>)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")
+    if (intentStr) lines.push(`All-time intents: ${intentStr}.`)
+    lines.push(
+      `Money events: ${overview.money_event_count}; action-like: ${overview.action_count}.`
+    )
   }
 
-  const byIntent: Record<string, number> = {}
-  let moneyCount = 0
-  let actionCount = 0
-  for (const row of rows) {
-    byIntent[row.intent] = (byIntent[row.intent] ?? 0) + 1
-    if (row.amount != null) moneyCount += 1
-    if (
-      ["security", "action_required", "needs_reply", "renewal", "trial"].includes(row.intent) ||
-      row.uncertain
-    ) {
-      actionCount += 1
+  if (rows.length === 0) {
+    lines.push(`Last ${hours}h: no newly classified messages in the lookback window.`)
+  } else {
+    const byIntent: Record<string, number> = {}
+    let moneyCount = 0
+    let actionCount = 0
+    for (const row of rows) {
+      byIntent[row.intent] = (byIntent[row.intent] ?? 0) + 1
+      if (row.amount != null) moneyCount += 1
+      if (
+        ["security", "action_required", "needs_reply", "renewal", "trial"].includes(row.intent) ||
+        row.uncertain
+      ) {
+        actionCount += 1
+      }
+    }
+    lines.push(
+      `Last ${hours}h sample: ${rows.length} top items · intents ${Object.entries(byIntent)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")} · actions ${actionCount} · money ${moneyCount}.`
+    )
+
+    const topActions = rows
+      .filter((r) =>
+        ["security", "action_required", "needs_reply", "renewal", "trial"].includes(r.intent)
+      )
+      .slice(0, 5)
+    if (topActions.length > 0) {
+      lines.push("Top action items:")
+      for (const a of topActions) {
+        lines.push(
+          `- [${a.intent}] ${a.vendor ?? a.from_address ?? "unknown"} — ${a.subject ?? "(no subject)"}` +
+            (a.amount != null ? ` ($${a.amount})` : "")
+        )
+      }
     }
   }
-
-  const clusters = listClusters(8).filter((c) => c.size > 1)
-  const lines = [
-    `Email intelligence digest (last ${hours}h): ${rows.length} classified.`,
-    `Intents: ${Object.entries(byIntent)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(", ")}.`,
-    `Action-like: ${actionCount}; money events: ${moneyCount}.`,
-  ]
 
   if (clusters.length > 0) {
     lines.push(
       "Collapsed clusters: " +
         clusters
           .slice(0, 5)
-          .map((c) => `${c.label}`)
+          .map((c) => c.label)
           .join("; ") +
         "."
     )
   }
 
-  const topActions = rows
-    .filter((r) =>
-      ["security", "action_required", "needs_reply", "renewal", "trial"].includes(r.intent)
-    )
-    .slice(0, 5)
-  if (topActions.length > 0) {
-    lines.push("Top action items:")
-    for (const a of topActions) {
-      lines.push(
-        `- [${a.intent}] ${a.vendor ?? a.from_address ?? "unknown"} — ${a.subject ?? "(no subject)"}` +
-          (a.amount != null ? ` ($${a.amount})` : "")
-      )
-    }
-  }
-
-  return lines.join("\n")
+  return lines.join("\n") || "Email intelligence digest: nothing indexed yet. Run a sync."
 }

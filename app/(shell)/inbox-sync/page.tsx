@@ -11,6 +11,7 @@ import {
   listSyncRuns,
   type LocalSyncRun,
 } from "@/lib/db/local"
+import { getOverviewStats } from "@/lib/db/intelligence"
 
 function runTitle(run: LocalSyncRun): string {
   if (run.status === "running") return "Sync in progress"
@@ -34,12 +35,14 @@ export default async function InboxSyncPage() {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const newThisWeek = countEmailsSince(weekAgo, userId)
   const syncTargets = providers.filter((p) => p.status !== "error").map((p) => ({ id: p.id, email: p.email }))
+  const overview = getOverviewStats(userId)
+  const historyIncomplete = providers.some((p) => !p.history_complete)
 
   const statCards = [
     { l: "Messages scanned", v: stats.emailCount.toLocaleString(), ic: "search" },
+    { l: "Indexed", v: (overview?.classified_count ?? 0).toLocaleString(), ic: "layers" },
     { l: "New this week", v: newThisWeek.toLocaleString(), ic: "arrowDown" },
     { l: "Subscriptions detected", v: String(stats.subscriptionCount), ic: "subs" },
-    { l: "Accounts detected", v: String(stats.accountCount), ic: "accounts" },
   ]
 
   const grouped: Array<{ date: string; items: LocalSyncRun[] }> = []
@@ -58,7 +61,9 @@ export default async function InboxSyncPage() {
           <h1 className="page-title">Sync activity</h1>
           <p className="page-sub">Every scan, token refresh, and detection run across your connected inboxes.</p>
         </div>
-        <SyncAllButton targets={syncTargets} variant="primary" />
+        <SyncAllButton targets={syncTargets} variant="primary">
+          {historyIncomplete ? "Continue sync" : "Sync all"}
+        </SyncAllButton>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 18 }}>
@@ -91,12 +96,22 @@ export default async function InboxSyncPage() {
                     <Provider provider={ib.type} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="center gap8"><span className="row-title ellip" style={{ fontSize: 12.5 }}>{ib.email}</span><StatusBadge status={ib.status} pulse={syncing} /></div>
-                      <div className="row-sub mono">{(scannedByProvider[ib.id] ?? 0).toLocaleString()} scanned · {ib.last_sync_at ? new Date(ib.last_sync_at).toLocaleDateString() : "never synced"}</div>
+                      <div className="row-sub mono">
+                        {(scannedByProvider[ib.id] ?? 0).toLocaleString()} stored ·{" "}
+                        {ib.history_complete
+                          ? "history complete"
+                          : `${ib.history_synced_count.toLocaleString()}/${ib.history_target.toLocaleString()} crawl`}
+                        {" · "}
+                        {ib.last_sync_at ? new Date(ib.last_sync_at).toLocaleDateString() : "never synced"}
+                      </div>
                     </div>
                     {ib.status === "error" ? (
                       <Link href="/connect"><Btn size="xs" variant="danger" icon="alert">Fix</Btn></Link>
                     ) : (
-                      <SyncButton target={{ id: ib.id, email: ib.email }} />
+                      <SyncButton
+                        target={{ id: ib.id, email: ib.email }}
+                        label={ib.history_complete ? "Sync" : "Continue"}
+                      />
                     )}
                   </div>
                 )

@@ -167,6 +167,151 @@ export async function callClaudeWithTools(
   throw new Error("Tool loop exhausted without a final answer")
 }
 
+const enc = new TextEncoder()
+
+function sseMsg(obj: Record<string, string>): Uint8Array {
+  return enc.encode(`data: ${JSON.stringify(obj)}\n\n`)
+}
+
+/**
+ * Like callClaudeWithTools but streams the final text response via SSE.
+ * Tool-use rounds run non-streaming (no visible text anyway); only the final
+ * text reply is streamed. Returns a ReadableStream<Uint8Array> the route can
+ * pipe directly into a Response.
+ */
+export function streamClaudeWithTools(
+  system: string,
+  userMessages: ChatMessage[]
+): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    async start(controller) {
+      const apiKey = process.env.ANTHROPIC_API_KEY
+      if (!apiKey) {
+        controller.enqueue(sseMsg({ type: "error", text: "No API key configured" }))
+        controller.close()
+        return
+      }
+
+      const messages: ApiMessage[] = userMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+
+      try {
+        // Tool-use rounds (non-streaming) — run synchronously up to MAX_TOOL_ROUNDS
+        for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model: MODEL,
+              max_tokens: 1280,
+              system,
+              tools: ASSISTANT_TOOLS,
+              messages,
+            }),
+          })
+
+          if (!res.ok) {
+            const detail = await res.text().catch(() => "")
+            throw new Error(`Anthropic API error ${res.status}: ${detail.slice(0, 200)}`)
+          }
+
+          const data = (await res.json()) as {
+            stop_reason?: string
+            content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
+          }
+
+          const content = data.content ?? []
+          const toolUses = content.filter((b) => b.type === "tool_use" && b.id && b.name)
+
+          if (toolUses.length === 0) {
+            // No tool calls — stream the final text now
+            break
+          }
+
+          // Send a progress event for this tool round
+          const toolNames = toolUses.map((t) => t.name).join(", ")
+          controller.enqueue(sseMsg({ type: "progress", text: toolNames }))
+
+          messages.push({
+            role: "assistant",
+            content: content.map((b) => {
+              if (b.type === "tool_use") return { type: "tool_use" as const, id: b.id!, name: b.name!, input: b.input ?? {} }
+              return { type: "text" as const, text: b.text ?? "" }
+            }),
+          })
+
+          const toolResults: ContentBlock[] = []
+          for (const tool of toolUses) {
+            const result = await runAssistantTool(tool.name!, tool.input ?? {})
+            toolResults.push({ type: "tool_result", tool_use_id: tool.id!, content: result })
+          }
+          messages.push({ role: "user", content: toolResults })
+        }
+
+        // Final streaming request (text only, no tools needed)
+        const streamRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            max_tokens: 1280,
+            system,
+            messages,
+            stream: true,
+          }),
+        })
+
+        if (!streamRes.ok) {
+          const detail = await streamRes.text().catch(() => "")
+          throw new Error(`Anthropic stream error ${streamRes.status}: ${detail.slice(0, 200)}`)
+        }
+
+        const reader = streamRes.body!.getReader()
+        const dec = new TextDecoder()
+        let buf = ""
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const lines = buf.split("\n")
+          buf = lines.pop() ?? ""
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue
+            const raw = line.slice(6).trim()
+            if (raw === "[DONE]") continue
+            try {
+              const evt = JSON.parse(raw) as { type: string; delta?: { type: string; text?: string } }
+              if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+                controller.enqueue(sseMsg({ type: "delta", text: evt.delta.text }))
+              }
+            } catch {
+              // ignore malformed SSE lines
+            }
+          }
+        }
+
+        controller.enqueue(sseMsg({ type: "done" }))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error"
+        controller.enqueue(sseMsg({ type: "error", text: msg }))
+      }
+
+      controller.close()
+    },
+  })
+}
+
 /**
  * Deterministic answer used when cloud AI is off or unavailable. Grounded in
  * the same real briefing the UI shows, so "Demo" mode still says true things.

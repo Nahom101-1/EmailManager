@@ -4,9 +4,8 @@ import { getAiSettings } from "@/lib/db/local"
 import { buildBriefing, buildLifeContext } from "@/lib/ai/context"
 import {
   AI_SYSTEM,
-  AiUnavailableError,
-  callClaudeWithTools,
   fallbackAnswer,
+  streamClaudeWithTools,
   type ChatMessage,
 } from "@/lib/ai/client"
 import { buildDigestContext } from "@/lib/ai/tools"
@@ -52,21 +51,22 @@ export async function POST(request: NextRequest) {
     if (!allowCloud) {
       return NextResponse.json({ live: false, text: localBriefingSummary(briefing) })
     }
-    try {
-      const text = await callClaudeWithTools(AI_SYSTEM, [
-        {
-          role: "user",
-          content:
-            `CONTEXT (read from the user's inbox):\n${context}\n\n` +
-            "Use get_daily_digest_inputs if helpful. Write a 2-3 sentence morning briefing: " +
-            "what genuinely needs them today vs what can wait. Direct and factual. No greeting.",
-        },
-      ])
-      return NextResponse.json({ live: true, text })
-    } catch (error) {
-      if (!(error instanceof AiUnavailableError)) console.error("assistant briefing error", error)
-      return NextResponse.json({ live: false, text: localBriefingSummary(briefing) })
-    }
+    const stream = streamClaudeWithTools(AI_SYSTEM, [
+      {
+        role: "user",
+        content:
+          `CONTEXT (read from the user's inbox):\n${context}\n\n` +
+          "Use get_daily_digest_inputs if helpful. Write a 2-3 sentence morning briefing: " +
+          "what genuinely needs them today vs what can wait. Direct and factual. No greeting.",
+      },
+    ])
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    })
   }
 
   // chat
@@ -85,13 +85,14 @@ export async function POST(request: NextRequest) {
     },
   ]
 
-  try {
-    const text = await callClaudeWithTools(AI_SYSTEM, messages)
-    return NextResponse.json({ live: true, text })
-  } catch (error) {
-    if (!(error instanceof AiUnavailableError)) console.error("assistant chat error", error)
-    return NextResponse.json({ live: false, text: fallbackAnswer(message, buildBriefing()) })
-  }
+  const stream = streamClaudeWithTools(AI_SYSTEM, messages)
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  })
 }
 
 function localBriefingSummary(briefing: ReturnType<typeof buildBriefing>): string {

@@ -16,11 +16,14 @@ const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
   { v: "ignored", label: "Ignored" },
 ]
 
+const PAGE_SIZE = 100
+
 export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[] }) {
   const router = useRouter()
   const { layout, set } = useTheme()
   const [filter, setFilter] = useState<"all" | SubscriptionStatus>("all")
   const [pending, setPending] = useState<string | null>(null)
+  const [visible, setVisible] = useState(PAGE_SIZE)
 
   const counts = useMemo(() => {
     const m = new Map<string, number>()
@@ -28,7 +31,8 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
     return m
   }, [subscriptions])
 
-  const shown = subscriptions.filter((s) => filter === "all" || s.status === filter)
+  const filtered = subscriptions.filter((s) => filter === "all" || s.status === filter)
+  const shown = filtered.slice(0, visible)
 
   async function patch(id: string, payload: Record<string, string>) {
     setPending(id)
@@ -47,7 +51,7 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
           {FILTERS.map((f) => {
             const count = f.v === "all" ? subscriptions.length : counts.get(f.v) ?? 0
             return (
-              <button key={f.v} className={"chip btn-chip" + (filter === f.v ? " on" : "")} onClick={() => setFilter(f.v)}>
+              <button key={f.v} className={"chip btn-chip" + (filter === f.v ? " on" : "")} onClick={() => { setFilter(f.v); setVisible(PAGE_SIZE) }}>
                 {f.label}<span className="num faint" style={{ fontSize: 11 }}>{count}</span>
               </button>
             )
@@ -55,12 +59,12 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
         </div>
         <div className="seg">
           {(["cards", "table"] as const).map((v) => (
-            <button key={v} className={layout === v ? "on" : ""} onClick={() => set("layout", v)}>{v === "cards" ? "Cards" : "Table"}</button>
+            <button key={v} className={layout === v ? "on" : ""} onClick={() => { setVisible(PAGE_SIZE); set("layout", v) }}>{v === "cards" ? "Cards" : "Table"}</button>
           ))}
         </div>
       </div>
 
-      {shown.length === 0 ? (
+      {filtered.length === 0 ? (
         <Card><div className="empty"><span className="ico"><Icon name="filter" size={20} /></span><h4>Nothing here</h4><p>No subscriptions match this filter.</p></div></Card>
       ) : layout === "cards" ? (
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))" }}>
@@ -128,6 +132,14 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
             </table>
           </div>
         </Card>
+      )}
+
+      {filtered.length > visible && (
+        <div className="btn-row mt14" style={{ justifyContent: "center" }}>
+          <button className="btn sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
+            Show more ({filtered.length - visible} remaining)
+          </button>
+        </div>
       )}
     </div>
   )

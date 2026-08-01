@@ -22,6 +22,11 @@ interface SyncResult {
   stored: number
   subscriptionsDetected: number
   accountsDetected: number
+  embedded: number
+  backlogRemaining: number
+  historySynced: number
+  historyTarget: number
+  historyComplete: boolean
 }
 
 interface SyncContextValue {
@@ -98,7 +103,17 @@ function SyncModal({
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [errored, setErrored] = useState(false)
-  const [result, setResult] = useState<SyncResult>({ listed: 0, stored: 0, subscriptionsDetected: 0, accountsDetected: 0 })
+  const [result, setResult] = useState<SyncResult>({
+    listed: 0,
+    stored: 0,
+    subscriptionsDetected: 0,
+    accountsDetected: 0,
+    embedded: 0,
+    backlogRemaining: 0,
+    historySynced: 0,
+    historyTarget: 2000,
+    historyComplete: true,
+  })
 
   useEffect(() => {
     let alive = true
@@ -110,7 +125,17 @@ function SyncModal({
     })
 
     ;(async () => {
-      const agg: SyncResult = { listed: 0, stored: 0, subscriptionsDetected: 0, accountsDetected: 0 }
+      const agg: SyncResult = {
+        listed: 0,
+        stored: 0,
+        subscriptionsDetected: 0,
+        accountsDetected: 0,
+        embedded: 0,
+        backlogRemaining: 0,
+        historySynced: 0,
+        historyTarget: 2000,
+        historyComplete: true,
+      }
       let anyError = false
       for (const target of targets) {
         try {
@@ -124,6 +149,13 @@ function SyncModal({
           agg.stored += data.stored ?? 0
           agg.subscriptionsDetected += data.subscriptionsDetected ?? 0
           agg.accountsDetected += data.accountsDetected ?? 0
+          agg.embedded += data.intelligence?.embedded ?? 0
+          agg.backlogRemaining += data.intelligence?.backlogRemaining ?? 0
+          if (data.history) {
+            agg.historySynced = Math.max(agg.historySynced, data.history.synced ?? 0)
+            agg.historyTarget = data.history.target ?? agg.historyTarget
+            agg.historyComplete = agg.historyComplete && Boolean(data.history.complete)
+          }
         } catch {
           anyError = true
         }
@@ -135,7 +167,16 @@ function SyncModal({
       setStep(STEPS.length)
       setDone(true)
       if (anyError) onToast("Some inboxes failed to sync", "err")
-      else onToast("Sync complete", "ok", `${agg.stored} messages · ${agg.subscriptionsDetected} subs · ${agg.accountsDetected} accounts`)
+      else {
+        const hist = agg.historyComplete
+          ? `${agg.stored} stored`
+          : `${agg.historySynced.toLocaleString()} / ${agg.historyTarget.toLocaleString()} history`
+        const intel =
+          agg.backlogRemaining > 0
+            ? ` · ${agg.embedded} indexed (${agg.backlogRemaining} queued)`
+            : ` · ${agg.embedded} indexed`
+        onToast("Sync complete", "ok", `${hist}${intel}`)
+      }
     })()
 
     return () => {
@@ -176,21 +217,32 @@ function SyncModal({
               ))}
             </div>
           ) : (
-            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {[
-                { l: "Messages scanned", v: result.listed },
-                { l: "Stored", v: result.stored },
-                { l: "Subscriptions", v: result.subscriptionsDetected },
-                { l: "Accounts", v: result.accountsDetected },
-              ].map((r) => (
-                <div key={r.l} className="card" style={{ padding: 13, background: "var(--surface-inset)" }}>
-                  <div className="stat" style={{ padding: 0, gap: 4 }}>
-                    <span className="label">{r.l}</span>
-                    <span className="val" style={{ fontSize: 22 }}>{r.v.toLocaleString()}</span>
+            <>
+              <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { l: "Messages scanned", v: result.listed },
+                  { l: "Stored", v: result.stored },
+                  { l: "Subscriptions", v: result.subscriptionsDetected },
+                  { l: "Accounts", v: result.accountsDetected },
+                ].map((r) => (
+                  <div key={r.l} className="card" style={{ padding: 13, background: "var(--surface-inset)" }}>
+                    <div className="stat" style={{ padding: 0, gap: 4 }}>
+                      <span className="label">{r.l}</span>
+                      <span className="val" style={{ fontSize: 22 }}>{r.v.toLocaleString()}</span>
+                    </div>
                   </div>
+                ))}
+              </div>
+              <div className="notice" style={{ marginTop: 12, padding: "10px 12px" }}>
+                <div className="body" style={{ fontSize: 12.5 }}>
+                  History: {result.historySynced.toLocaleString()} / {result.historyTarget.toLocaleString()}
+                  {result.historyComplete ? " · complete" : " · continue sync to load more"}
+                  {result.backlogRemaining > 0
+                    ? ` · intelligence backlog ${result.backlogRemaining.toLocaleString()}`
+                    : ""}
                 </div>
-              ))}
-            </div>
+              </div>
+            </>
           )}
         </div>
 
@@ -202,7 +254,6 @@ function SyncModal({
             <Link href="/subscriptions" onClick={onClose}>
               <Btn size="sm" variant="ghost">View subscriptions</Btn>
             </Link>
-            <Btn size="sm" variant="primary" onClick={onClose}>Done</Btn>
           </div>
         )}
       </div>

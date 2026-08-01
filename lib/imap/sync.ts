@@ -132,23 +132,14 @@ export async function syncImapProvider(input: { providerId: string }) {
       accountsDetected,
     })
 
-    // Best-effort: run email intelligence pipeline (embed → classify → extract → cluster).
-    // Skips body fetching for IMAP (no Google token), uses snippet only.
-    const emailIds = [...emailIdMap.values()]
-    if (emailIds.length > 0) {
-      const origin = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? "http://localhost:3000"
-      try {
-        const intel = await runEmailIntelligence({ providerId: input.providerId, origin, emailIds })
-        return {
-          listed: rawEmails.length,
-          stored,
-          subscriptionsDetected,
-          accountsDetected,
-          intelligence: intel,
-        }
-      } catch (err) {
-        console.warn("[imap-sync] intelligence pipeline skipped:", err)
-      }
+    // Best-effort incremental intelligence (snippet-only for IMAP — no body fetch).
+    let intelligence = { embedded: 0, classified: 0, clusters: 0, backlogRemaining: 0 }
+    try {
+      const origin =
+        process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? "http://localhost:3000"
+      intelligence = await runEmailIntelligence({ providerId: input.providerId, origin })
+    } catch (err) {
+      console.warn("[imap-sync] intelligence pipeline skipped:", err)
     }
 
     return {
@@ -156,6 +147,7 @@ export async function syncImapProvider(input: { providerId: string }) {
       stored,
       subscriptionsDetected,
       accountsDetected,
+      intelligence,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "IMAP sync failed"

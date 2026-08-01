@@ -184,7 +184,7 @@ export async function syncGmailProvider(input: {
 
     // Unique stored emails for this provider — not fetch attempts.
     const uniqueStored = countProviderEmails(input.providerId)
-    let historySyncedCount = uniqueStored
+    const historySyncedCount = uniqueStored
     let persistToken: string | null = null
 
     if (mode === "crawl") {

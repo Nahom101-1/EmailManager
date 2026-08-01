@@ -17,10 +17,17 @@ export function StatusBar({ model, ollamaOk, width }: Props) {
   const spacer = " ".repeat(pad)
   return (
     <Box paddingX={1}>
-      <Text bold color="white" backgroundColor="blueBright">{left}</Text>
+      <Text bold color="white" backgroundColor="blueBright">
+        {left}
+      </Text>
       <Text backgroundColor="blueBright">{spacer}</Text>
-      <Text color={dotColor as "green" | "gray"} backgroundColor="blueBright">{dot}</Text>
-      <Text color="white" backgroundColor="blueBright"> {model}</Text>
+      <Text color={dotColor as "green" | "gray"} backgroundColor="blueBright">
+        {dot}
+      </Text>
+      <Text color="white" backgroundColor="blueBright">
+        {" "}
+        {model}
+      </Text>
     </Box>
   )
 }

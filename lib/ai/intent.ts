@@ -37,14 +37,29 @@ export interface IntentResult {
 }
 
 const PROTOTYPES: Array<{ intent: EmailIntent; text: string }> = [
-  { intent: "receipt", text: "Your receipt for payment of $12.99 subscription invoice charged successfully" },
+  {
+    intent: "receipt",
+    text: "Your receipt for payment of $12.99 subscription invoice charged successfully",
+  },
   { intent: "renewal", text: "Your subscription renews tomorrow auto-renewal billing notice" },
   { intent: "trial", text: "Your free trial ends in 3 days upgrade now to keep access" },
-  { intent: "security", text: "Security alert new sign-in to your account password reset verification code" },
-  { intent: "newsletter", text: "Weekly digest newsletter this week in tech unsubscribe from mailing list" },
+  {
+    intent: "security",
+    text: "Security alert new sign-in to your account password reset verification code",
+  },
+  {
+    intent: "newsletter",
+    text: "Weekly digest newsletter this week in tech unsubscribe from mailing list",
+  },
   { intent: "promo", text: "Limited time offer 50% off sale discount promo code expires soon" },
-  { intent: "action_required", text: "Action required please confirm your payment method update billing" },
-  { intent: "needs_reply", text: "Can you get back to me about the meeting proposal looking forward to your reply" },
+  {
+    intent: "action_required",
+    text: "Action required please confirm your payment method update billing",
+  },
+  {
+    intent: "needs_reply",
+    text: "Can you get back to me about the meeting proposal looking forward to your reply",
+  },
   { intent: "fyi", text: "FYI shipment delivered notification for your records no action needed" },
 ]
 
@@ -89,7 +104,11 @@ export function heuristicIntent(input: {
 
   const hits: Array<{ intent: EmailIntent; weight: number }> = []
 
-  if (/security alert|password reset|verify your|verification code|two-factor|new sign-?in|suspicious/.test(hay)) {
+  if (
+    /security alert|password reset|verify your|verification code|two-factor|new sign-?in|suspicious/.test(
+      hay
+    )
+  ) {
     hits.push(score("security", 0.85, "Security language"))
   }
   if (/receipt|invoice|payment received|order confirmation|charged \$|you paid/.test(hay)) {
@@ -101,16 +120,29 @@ export function heuristicIntent(input: {
   if (/\bfree trial\b|\btrial (ends|ending|expir)/.test(hay)) {
     hits.push(score("trial", 0.8, "Trial language"))
   }
-  if (/unsubscribe|newsletter|weekly digest|daily digest|mailing list/.test(hay) || input.headers?.["List-Unsubscribe"]) {
+  if (
+    /unsubscribe|newsletter|weekly digest|daily digest|mailing list/.test(hay) ||
+    input.headers?.["List-Unsubscribe"]
+  ) {
     hits.push(score("newsletter", 0.7, "Newsletter signals"))
   }
-  if (/% off|limited time|promo code|sale ends|discount|deal of/.test(hay) || labels.includes("category_promotions")) {
+  if (
+    /% off|limited time|promo code|sale ends|discount|deal of/.test(hay) ||
+    labels.includes("category_promotions")
+  ) {
     hits.push(score("promo", 0.75, "Promo language"))
   }
-  if (/action required|please (confirm|update|verify)|payment (failed|declined)|update your (card|payment)/.test(hay)) {
+  if (
+    /action required|please (confirm|update|verify)|payment (failed|declined)|update your (card|payment)/.test(
+      hay
+    )
+  ) {
     hits.push(score("action_required", 0.8, "Action-required language"))
   }
-  if (/please reply|looking forward to (hearing|your)|can you|would you|rsvp|\?/.test(hay) && !input.headers?.["List-Unsubscribe"]) {
+  if (
+    /please reply|looking forward to (hearing|your)|can you|would you|rsvp|\?/.test(hay) &&
+    !input.headers?.["List-Unsubscribe"]
+  ) {
     hits.push(score("needs_reply", 0.55, "Looks like it wants a reply"))
   }
 

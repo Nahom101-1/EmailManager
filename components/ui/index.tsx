@@ -11,8 +11,18 @@ type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   iconR?: string
 }
 
-export function Btn({ variant = "", size = "", icon, iconR, children, className = "", ...rest }: BtnProps) {
-  const cls = ["btn", variant, size, icon && !children ? "icon" : "", className].filter(Boolean).join(" ")
+export function Btn({
+  variant = "",
+  size = "",
+  icon,
+  iconR,
+  children,
+  className = "",
+  ...rest
+}: BtnProps) {
+  const cls = ["btn", variant, size, icon && !children ? "icon" : "", className]
+    .filter(Boolean)
+    .join(" ")
   const isz = size === "xs" ? 13 : 15
   return (
     <button className={cls} {...rest}>
@@ -90,7 +100,15 @@ export function StatusBadge({ status, pulse }: { status: string; pulse?: boolean
 }
 
 /* ---------- Monogram tile ---------- */
-export function Tile({ mono, color, size = "" }: { mono: ReactNode; color?: string; size?: "" | "sm" | "lg" }) {
+export function Tile({
+  mono,
+  color,
+  size = "",
+}: {
+  mono: ReactNode
+  color?: string
+  size?: "" | "sm" | "lg"
+}) {
   const style: CSSProperties = color
     ? { background: color + "1a", color, borderColor: color + "33" }
     : {}
@@ -105,14 +123,20 @@ export function Tile({ mono, color, size = "" }: { mono: ReactNode; color?: stri
 export function Provider({ provider, size = "" }: { provider: string; size?: "" | "sm" | "lg" }) {
   if (provider === "gmail" || provider === "google") {
     return (
-      <span className={"mono-tile " + size} style={{ background: "var(--surface-inset)", color: "#4285F4", fontWeight: 800 }}>
+      <span
+        className={"mono-tile " + size}
+        style={{ background: "var(--surface-inset)", color: "#4285F4", fontWeight: 800 }}
+      >
         G
       </span>
     )
   }
   if (provider === "outlook") {
     return (
-      <span className={"mono-tile " + size} style={{ background: "#0a64bf", color: "#fff", border: 0 }}>
+      <span
+        className={"mono-tile " + size}
+        style={{ background: "#0a64bf", color: "#fff", border: 0 }}
+      >
         O
       </span>
     )
@@ -138,7 +162,15 @@ export function Conf({ value }: { value: number }) {
 }
 
 /* ---------- Field ---------- */
-export function Field({ label, hint, children }: { label?: string; hint?: string; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label?: string
+  hint?: string
+  children: ReactNode
+}) {
   return (
     <div className="field">
       {label && <label>{label}</label>}

@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
   // Keep native / heavy ML packages out of the Next bundler.
@@ -8,6 +8,6 @@ const nextConfig: NextConfig = {
     "onnxruntime-node",
     "sharp",
   ],
-};
+}
 
-export default nextConfig;
+export default nextConfig

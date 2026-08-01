@@ -76,7 +76,10 @@ export function countEmailsNeedingIntelligence(providerId: string): number {
 }
 
 /** @deprecated use listEmailsNeedingIntelligence */
-export function listEmailsNeedingEmbed(providerId: string, emailIds?: string[]): EmailForIntelligence[] {
+export function listEmailsNeedingEmbed(
+  providerId: string,
+  emailIds?: string[]
+): EmailForIntelligence[] {
   if (emailIds && emailIds.length > 0) {
     const placeholders = emailIds.map(() => "?").join(",")
     return getDb()
@@ -424,7 +427,9 @@ export function listIntelligenceByIntent(
   intent: EmailIntent,
   limit = 20,
   userId = getLocalUserId()
-): Array<StoredIntelligence & { subject: string | null; from_address: string | null; date: string | null }> {
+): Array<
+  StoredIntelligence & { subject: string | null; from_address: string | null; date: string | null }
+> {
   return getDb()
     .prepare(
       `
@@ -438,15 +443,18 @@ export function listIntelligenceByIntent(
     `
     )
     .all(userId, intent, limit) as Array<
-    StoredIntelligence & { subject: string | null; from_address: string | null; date: string | null }
+    StoredIntelligence & {
+      subject: string | null
+      from_address: string | null
+      date: string | null
+    }
   >
 }
 
 export function getIntelligence(emailId: string): StoredIntelligence | null {
   return (
-    (getDb()
-      .prepare("select * from email_intelligence where email_id = ?")
-      .get(emailId) as StoredIntelligence | undefined) ?? null
+    (getDb().prepare("select * from email_intelligence where email_id = ?").get(emailId) as
+      StoredIntelligence | undefined) ?? null
   )
 }
 
@@ -525,11 +533,7 @@ export function ftsSearchEmails(
   }
 }
 
-export function getDailyDigestRows(
-  sinceIso: string,
-  userId = getLocalUserId(),
-  limit = 80
-) {
+export function getDailyDigestRows(sinceIso: string, userId = getLocalUserId(), limit = 80) {
   return getDb()
     .prepare(
       `
@@ -645,13 +649,7 @@ export interface OverviewDailyRow {
   email_count: number
 }
 
-const ACTION_INTENTS = new Set([
-  "security",
-  "action_required",
-  "needs_reply",
-  "renewal",
-  "trial",
-])
+const ACTION_INTENTS = new Set(["security", "action_required", "needs_reply", "renewal", "trial"])
 
 export function refreshOverviewRollups(userId = getLocalUserId()): OverviewStats {
   const db = getDb()
@@ -862,9 +860,7 @@ export function refreshOverviewRollups(userId = getLocalUserId()): OverviewStats
 }
 
 export function getOverviewStats(userId = getLocalUserId()): OverviewStats | null {
-  const row = getDb()
-    .prepare("select * from overview_stats where user_id = ?")
-    .get(userId) as
+  const row = getDb().prepare("select * from overview_stats where user_id = ?").get(userId) as
     | {
         user_id: string
         email_count: number
@@ -923,9 +919,9 @@ export function listOverviewDaily(userId = getLocalUserId(), limit = 14): Overvi
 }
 
 export function getClusterRebuildDebt(): number {
-  const raw = getDb().prepare("select value from settings where key = ?").get("cluster_rebuild_debt") as
-    | { value: string }
-    | undefined
+  const raw = getDb()
+    .prepare("select value from settings where key = ?")
+    .get("cluster_rebuild_debt") as { value: string } | undefined
   return raw ? Number(raw.value) || 0 : 0
 }
 

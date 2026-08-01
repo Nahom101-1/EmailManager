@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react"
+import { createContext, useCallback, useContext, useState } from "react"
 
 export type ThemeMode = "light" | "dark"
 export type StyleMode = "flat" | "soft" | "grid"
@@ -53,18 +53,19 @@ export const themeNoFlashScript = `
 }catch(e){}})();
 `
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<ThemeState>(DEFAULTS)
+function readStoredTheme(): ThemeState {
+  if (typeof window === "undefined") return DEFAULTS
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Partial<ThemeState>
+    return { ...DEFAULTS, ...saved }
+  } catch {
+    return DEFAULTS
+  }
+}
 
-  // Hydrate from localStorage (the no-flash script already set the attributes).
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")
-      setState((prev) => ({ ...prev, ...saved }))
-    } catch {
-      /* ignore */
-    }
-  }, [])
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // Lazy init avoids setState-in-effect; FOUC script already applied attrs.
+  const [state, setState] = useState<ThemeState>(readStoredTheme)
 
   const set = useCallback(<K extends keyof ThemeState>(key: K, value: ThemeState[K]) => {
     setState((prev) => {
@@ -85,9 +86,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [set, state.theme])
 
   return (
-    <ThemeContext.Provider value={{ ...state, set, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={{ ...state, set, toggleTheme }}>{children}</ThemeContext.Provider>
   )
 }
 

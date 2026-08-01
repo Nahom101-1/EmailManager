@@ -4,14 +4,7 @@
 import { learningConfidenceBias } from "@/lib/ai/learning"
 
 export type SubscriptionCategory =
-  | "saas"
-  | "streaming"
-  | "finance"
-  | "shopping"
-  | "newsletter"
-  | "utilities"
-  | "education"
-  | "other"
+  "saas" | "streaming" | "finance" | "shopping" | "newsletter" | "utilities" | "education" | "other"
 
 export interface DetectionInput {
   from?: string
@@ -169,7 +162,10 @@ function clampConfidence(value: number) {
   return Math.max(0, Math.min(0.99, Math.round(value * 100) / 100))
 }
 
-export function parseAmount(text: string): { amount: number | null; billingCycle: "monthly" | "yearly" | null } {
+export function parseAmount(text: string): {
+  amount: number | null
+  billingCycle: "monthly" | "yearly" | null
+} {
   const patterns: Array<[RegExp, "monthly" | "yearly" | null]> = [
     [/\$\s*(\d+(?:\.\d{1,2})?)\s*\/\s*(?:mo(?:nth)?|monthly)/i, "monthly"],
     [/\$\s*(\d+(?:\.\d{1,2})?)\s+per\s+(?:mo(?:nth)?)/i, "monthly"],

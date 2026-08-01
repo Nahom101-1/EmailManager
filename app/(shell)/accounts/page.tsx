@@ -18,17 +18,31 @@ export default async function AccountsPage() {
           <div>
             <div className="page-eyebrow">Accounts</div>
             <h1 className="page-title">Accounts</h1>
-            <p className="page-sub">Online services tied to your email addresses, discovered from sign-ins, receipts, and alerts.</p>
+            <p className="page-sub">
+              Online services tied to your email addresses, discovered from sign-ins, receipts, and
+              alerts.
+            </p>
           </div>
         </div>
         <Card>
           <div className="empty">
-            <span className="ico"><Icon name="accounts" size={22} /></span>
+            <span className="ico">
+              <Icon name="accounts" size={22} />
+            </span>
             <h4>No accounts discovered yet</h4>
-            <p>Accounts appear here after you sync an inbox. LifeOS reads sign-in alerts, receipts, and welcome emails to map where you have accounts.</p>
+            <p>
+              Accounts appear here after you sync an inbox. LifeOS reads sign-in alerts, receipts,
+              and welcome emails to map where you have accounts.
+            </p>
             <div className="btn-row mt14" style={{ justifyContent: "center" }}>
-              <Link href="/inbox-sync"><Btn variant="primary" icon="refresh">Go to sync</Btn></Link>
-              <Link href="/connect"><Btn icon="connect">Connect inbox</Btn></Link>
+              <Link href="/inbox-sync">
+                <Btn variant="primary" icon="refresh">
+                  Go to sync
+                </Btn>
+              </Link>
+              <Link href="/connect">
+                <Btn icon="connect">Connect inbox</Btn>
+              </Link>
             </div>
           </div>
         </Card>
@@ -49,15 +63,23 @@ export default async function AccountsPage() {
         <div>
           <div className="page-eyebrow">Accounts</div>
           <h1 className="page-title">Accounts</h1>
-          <p className="page-sub">Online services tied to your email addresses, discovered from sign-ins, receipts, and alerts.</p>
+          <p className="page-sub">
+            Online services tied to your email addresses, discovered from sign-ins, receipts, and
+            alerts.
+          </p>
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 16 }}>
         {stats.map((s) => (
           <Card key={s.l} className="stat">
-            <span className="label"><Icon name={s.ic} size={13} />{s.l}</span>
-            <span className="val" style={s.warn && s.v > 0 ? { color: "var(--st-warn)" } : {}}>{s.v}</span>
+            <span className="label">
+              <Icon name={s.ic} size={13} />
+              {s.l}
+            </span>
+            <span className="val" style={s.warn && s.v > 0 ? { color: "var(--st-warn)" } : {}}>
+              {s.v}
+            </span>
           </Card>
         ))}
       </div>

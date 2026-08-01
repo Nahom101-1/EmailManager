@@ -26,7 +26,10 @@ export async function POST(
       return NextResponse.json(result)
     }
 
-    return NextResponse.json({ error: `Sync not supported for provider type: ${provider.type}` }, { status: 422 })
+    return NextResponse.json(
+      { error: `Sync not supported for provider type: ${provider.type}` },
+      { status: 422 }
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sync failed"
     return NextResponse.json({ error: message }, { status: 422 })

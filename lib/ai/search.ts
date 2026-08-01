@@ -27,10 +27,7 @@ export interface SearchResult {
   }>
 }
 
-export async function hybridSearchEmails(
-  query: string,
-  limit = 12
-): Promise<HybridEmailHit[]> {
+export async function hybridSearchEmails(query: string, limit = 12): Promise<HybridEmailHit[]> {
   const q = query.trim()
   if (!q) return []
 

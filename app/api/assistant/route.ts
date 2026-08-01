@@ -2,12 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { getAiSettings } from "@/lib/db/local"
 import { buildBriefing, buildLifeContext } from "@/lib/ai/context"
-import {
-  AI_SYSTEM,
-  fallbackAnswer,
-  streamClaudeWithTools,
-  type ChatMessage,
-} from "@/lib/ai/client"
+import { AI_SYSTEM, fallbackAnswer, streamClaudeWithTools, type ChatMessage } from "@/lib/ai/client"
 import { buildDigestContext } from "@/lib/ai/tools"
 
 const chatSchema = z.object({
@@ -64,7 +59,7 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
       },
     })
   }
@@ -90,7 +85,7 @@ export async function POST(request: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
     },
   })
 }

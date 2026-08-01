@@ -27,7 +27,9 @@ export function App() {
       setHeight(process.stdout.rows || 36)
     }
     process.stdout.on("resize", onResize)
-    return () => { process.stdout.off("resize", onResize) }
+    return () => {
+      process.stdout.off("resize", onResize)
+    }
   }, [])
 
   useEffect(() => {
@@ -50,42 +52,45 @@ export function App() {
     if (key.escape) exit()
   })
 
-  const handleSubmit = useCallback(async (text: string) => {
-    const q = text.trim()
-    if (!q || loading) return
-    setInput("")
-    const history = messages.map((m) => ({ role: m.role === "ai" ? "assistant" as const : "user" as const, content: m.text }))
-    setMessages((m) => [...m, { role: "user", text: q }])
-    setLoading(true)
-    // Add streaming placeholder
-    setMessages((m) => [...m, { role: "ai", text: "", streaming: true }])
-    try {
-      const { streamAi, AI_SYSTEM } = await import("../lib/ai/client.js")
-      let accumulated = ""
-      for await (const chunk of streamAi(AI_SYSTEM, [
-        ...history,
-        { role: "user", content: q },
-      ])) {
-        accumulated += chunk
-        const finalText = accumulated
+  const handleSubmit = useCallback(
+    async (text: string) => {
+      const q = text.trim()
+      if (!q || loading) return
+      setInput("")
+      const history = messages.map((m) => ({
+        role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+        content: m.text,
+      }))
+      setMessages((m) => [...m, { role: "user", text: q }])
+      setLoading(true)
+      // Add streaming placeholder
+      setMessages((m) => [...m, { role: "ai", text: "", streaming: true }])
+      try {
+        const { streamAi, AI_SYSTEM } = await import("../lib/ai/client.js")
+        let accumulated = ""
+        for await (const chunk of streamAi(AI_SYSTEM, [...history, { role: "user", content: q }])) {
+          accumulated += chunk
+          const finalText = accumulated
+          setMessages((m) => {
+            const copy = [...m]
+            copy[copy.length - 1] = { role: "ai", text: finalText, streaming: true }
+            return copy
+          })
+        }
         setMessages((m) => {
           const copy = [...m]
-          copy[copy.length - 1] = { role: "ai", text: finalText, streaming: true }
+          copy[copy.length - 1] = { role: "ai", text: accumulated, streaming: false }
           return copy
         })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Error calling AI"
+        setMessages((m) => [...m.slice(0, -1), { role: "ai", text: `Error: ${msg}` }])
+      } finally {
+        setLoading(false)
       }
-      setMessages((m) => {
-        const copy = [...m]
-        copy[copy.length - 1] = { role: "ai", text: accumulated, streaming: false }
-        return copy
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Error calling AI"
-      setMessages((m) => [...m.slice(0, -1), { role: "ai", text: `Error: ${msg}` }])
-    } finally {
-      setLoading(false)
-    }
-  }, [messages, loading, exit])
+    },
+    [messages, loading]
+  )
 
   const leftWidth = Math.floor(width * 0.35)
   const rightWidth = width - leftWidth

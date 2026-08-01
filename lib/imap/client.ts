@@ -46,7 +46,10 @@ export async function testImapConnection(config: ImapConfig): Promise<Connection
 function formatImapError(raw: string, config: ImapConfig) {
   const message = raw.trim()
 
-  if (config.host === "imap.gmail.com" && /command failed|auth|login|credentials|password/i.test(message)) {
+  if (
+    config.host === "imap.gmail.com" &&
+    /command failed|auth|login|credentials|password/i.test(message)
+  ) {
     return "Gmail login failed. Use your full Gmail address and a Google app password, not your normal Google account password. Also confirm IMAP is enabled in Gmail settings."
   }
 
@@ -58,7 +61,9 @@ function formatImapError(raw: string, config: ImapConfig) {
     return `Login failed. Check the IMAP username and password. Some providers, including Domeneshop, use a mailbox username instead of the email address.`
   }
 
-  return message || `Could not reach ${config.host}:${config.port} — check host, port, and credentials`
+  return (
+    message || `Could not reach ${config.host}:${config.port} — check host, port, and credentials`
+  )
 }
 
 export async function fetchEmails(
@@ -96,9 +101,7 @@ export async function fetchEmails(
           source: false,
         })) {
           const from = msg.envelope?.from?.[0]
-          const fromStr = from
-            ? `${from.name ?? ""} <${from.address ?? ""}>`.trim()
-            : ""
+          const fromStr = from ? `${from.name ?? ""} <${from.address ?? ""}>`.trim() : ""
 
           const to = msg.envelope?.to?.[0]
           const toStr = to?.address ?? ""
@@ -122,9 +125,7 @@ export async function fetchEmails(
 
     await client.logout()
   } catch (err) {
-    throw new Error(
-      `IMAP fetch failed: ${err instanceof Error ? err.message : "Unknown error"}`
-    )
+    throw new Error(`IMAP fetch failed: ${err instanceof Error ? err.message : "Unknown error"}`)
   } finally {
     client.close()
   }

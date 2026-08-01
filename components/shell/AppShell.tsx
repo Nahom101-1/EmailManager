@@ -40,34 +40,54 @@ export function AppShell({
   const pathname = usePathname()
   const { theme, toggleTheme } = useTheme()
 
-  const crumbs = pathname.startsWith("/accounts/") && pathname !== "/accounts"
-    ? ["Accounts", "Detail"]
-    : CRUMBS[pathname] ?? ["Dashboard"]
+  const crumbs =
+    pathname.startsWith("/accounts/") && pathname !== "/accounts"
+      ? ["Accounts", "Detail"]
+      : (CRUMBS[pathname] ?? ["Dashboard"])
 
   return (
     <SyncProvider>
       <div className="app">
         <aside className="side">
           <Link href="/" className="brand">
-            <span className="brand-mark"><Icon name="layers" size={16} /></span>
-            <span className="brand-name">Life<b>OS</b></span>
+            <span className="brand-mark">
+              <Icon name="layers" size={16} />
+            </span>
+            <span className="brand-name">
+              Life<b>OS</b>
+            </span>
           </Link>
           <div className="side-label">Workspace</div>
           {NAV.map((n) => {
-            const active = pathname === n.href || (n.href === "/accounts" && pathname.startsWith("/accounts/"))
+            const active =
+              pathname === n.href || (n.href === "/accounts" && pathname.startsWith("/accounts/"))
             const count = n.countKey ? counts[n.countKey] : undefined
             return (
               <Link key={n.href} href={n.href} className={"nav-item" + (active ? " on" : "")}>
-                <span className="nav-ic"><Icon name={n.icon} size={16} /></span>
+                <span className="nav-ic">
+                  <Icon name={n.icon} size={16} />
+                </span>
                 {n.label}
                 {count != null && <span className="nav-count">{count}</span>}
               </Link>
             )
           })}
           <div className="side-foot">
-            <div className="notice accent" style={{ padding: "10px 11px", flexDirection: "column", gap: 7 }}>
-              <div className="center gap6" style={{ fontSize: 11.5, fontWeight: 650, color: "var(--accent)", whiteSpace: "nowrap" }}>
-                <Icon name="lock" size={12} />Local-first
+            <div
+              className="notice accent"
+              style={{ padding: "10px 11px", flexDirection: "column", gap: 7 }}
+            >
+              <div
+                className="center gap6"
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 650,
+                  color: "var(--accent)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Icon name="lock" size={12} />
+                Local-first
               </div>
               <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.4 }}>
                 All data stays on this machine. Read-only access only.

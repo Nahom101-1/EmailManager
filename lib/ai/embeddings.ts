@@ -88,10 +88,7 @@ export function emailEmbedText(input: {
   return parts.join("\n")
 }
 
-function parseExtractorOutput(
-  data: Float32Array | number[],
-  count: number
-): Float32Array[] {
+function parseExtractorOutput(data: Float32Array | number[], count: number): Float32Array[] {
   const flat = data instanceof Float32Array ? data : Float32Array.from(data)
   if (count === 1) {
     if (flat.length === EMBEDDING_DIMS) return [flat]

@@ -37,7 +37,11 @@ export function SyncAllButton({
       size={size}
       variant={variant}
       icon="refresh"
-      onClick={() => (targets.length ? startSync(targets, "All active inboxes") : toast("No active inboxes to sync", "err"))}
+      onClick={() =>
+        targets.length
+          ? startSync(targets, "All active inboxes")
+          : toast("No active inboxes to sync", "err")
+      }
     >
       {children}
     </Btn>

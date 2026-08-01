@@ -11,7 +11,16 @@ const schema = z
   .object({
     status: z.enum(["active", "cancelled", "unknown", "ignored"]).optional(),
     category: z
-      .enum(["saas", "streaming", "finance", "shopping", "newsletter", "utilities", "education", "other"])
+      .enum([
+        "saas",
+        "streaming",
+        "finance",
+        "shopping",
+        "newsletter",
+        "utilities",
+        "education",
+        "other",
+      ])
       .optional(),
   })
   .refine((value) => value.status !== undefined || value.category !== undefined, {

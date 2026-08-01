@@ -122,7 +122,7 @@ export async function runAssistantTool(
           source: h.source,
           intent: h.intent ?? null,
           // Snippets are message content — only when content scope is on.
-          snippet: allowContent ? h.snippet?.slice(0, 160) ?? null : null,
+          snippet: allowContent ? (h.snippet?.slice(0, 160) ?? null) : null,
         })),
         null,
         0
@@ -279,7 +279,9 @@ export async function runAssistantTool(
           source: sub.source,
           amount: (sub as { amount?: number | null }).amount ?? intel?.amount ?? null,
           billingCycle:
-            (sub as { billing_cycle?: string | null }).billing_cycle ?? intel?.billing_cycle ?? null,
+            (sub as { billing_cycle?: string | null }).billing_cycle ??
+            intel?.billing_cycle ??
+            null,
           evidence: evidence
             ? {
                 emailId: evidence.id,

@@ -420,8 +420,7 @@ export function SubscriptionsBrowser({
       {(grouped ? filteredGroups.length : filtered.length) > visible && (
         <div className="btn-row mt14" style={{ justifyContent: "center" }}>
           <button className="btn sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
-            Show more (
-            {(grouped ? filteredGroups.length : filtered.length) - visible} remaining)
+            Show more ({(grouped ? filteredGroups.length : filtered.length) - visible} remaining)
           </button>
         </div>
       )}

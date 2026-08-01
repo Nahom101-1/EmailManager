@@ -17,11 +17,7 @@ import {
 } from "@/lib/db/local"
 import { detectAccount, detectSubscription } from "@/lib/detection"
 import { decryptPassword } from "@/lib/crypto/credentials"
-import {
-  fetchEmails,
-  IMAP_HISTORY_TARGET,
-  IMAP_MESSAGES_PER_SYNC,
-} from "@/lib/imap/client"
+import { fetchEmails, IMAP_HISTORY_TARGET, IMAP_MESSAGES_PER_SYNC } from "@/lib/imap/client"
 import type { ImapConfig } from "@/types/provider"
 import { runEmailIntelligence } from "@/lib/ai/pipeline"
 
@@ -70,9 +66,7 @@ export async function syncImapProvider(input: {
   try {
     // After history complete: only pull a small newest page for incremental updates.
     const fetchOffset = provider.history_complete ? 0 : resumeOffset
-    const fetchMax = provider.history_complete
-      ? Math.min(100, messagesPerSync)
-      : messagesPerSync
+    const fetchMax = provider.history_complete ? Math.min(100, messagesPerSync) : messagesPerSync
 
     const fetched = await fetchEmails(config, input.providerId, {
       offset: fetchOffset,

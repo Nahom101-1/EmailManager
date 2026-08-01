@@ -391,7 +391,6 @@ export function reclaimStaleSyncRuns(maxAgeMs = 15 * 60 * 1000): number {
   return staleRuns.changes + stuckProviders.changes
 }
 
-
 export function deleteProvider(providerId: string) {
   const database = getDb()
   const remove = database.transaction((id: string) => {
@@ -1039,9 +1038,7 @@ export function setProviderTag(providerId: string, tag: ProviderTag) {
   setSetting(`provider_tag:${providerId}`, JSON.stringify(tag))
 }
 
-export function listProviderTags(
-  providerIds: string[]
-): Record<string, ProviderTag> {
+export function listProviderTags(providerIds: string[]): Record<string, ProviderTag> {
   const out: Record<string, ProviderTag> = {}
   for (const id of providerIds) {
     const tag = getProviderTag(id)

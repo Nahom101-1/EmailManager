@@ -75,8 +75,8 @@ export default async function AccountsPage({
           <div className="page-eyebrow">Accounts</div>
           <h1 className="page-title">Accounts</h1>
           <p className="page-sub">
-            Online services tied to your email addresses. Grouped view merges the same company across
-            inboxes.
+            Online services tied to your email addresses. Grouped view merges the same company
+            across inboxes.
           </p>
         </div>
       </div>

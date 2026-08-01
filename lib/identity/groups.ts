@@ -130,18 +130,11 @@ export function listAccountGroups(userId = getLocalUserId()): CompanyGroup<Accou
   const groups: CompanyGroup<AccountGroupInstance>[] = []
   for (const [key, rows] of map) {
     const inboxes = Array.from(
-      new Set(
-        rows
-          .map((r) => r.provider_email ?? r.email)
-          .filter((e): e is string => Boolean(e))
-      )
+      new Set(rows.map((r) => r.provider_email ?? r.email).filter((e): e is string => Boolean(e)))
     )
     const multiInbox = inboxes.length > 1
     const purposeTags = purposeTagsForInboxes(inboxes, providerByEmail, tags)
-    const tagsList = [
-      ...(multiInbox ? ["multi-inbox"] : []),
-      ...purposeTags.map((p) => p),
-    ]
+    const tagsList = [...(multiInbox ? ["multi-inbox"] : []), ...purposeTags.map((p) => p)]
     groups.push({
       key,
       company: pickCompanyName(
@@ -197,17 +190,12 @@ export function listSubscriptionGroups(
   for (const [key, rows] of map) {
     const inboxes = Array.from(
       new Set(
-        rows
-          .map((r) => r.provider_email ?? r.email_used)
-          .filter((e): e is string => Boolean(e))
+        rows.map((r) => r.provider_email ?? r.email_used).filter((e): e is string => Boolean(e))
       )
     )
     const multiInbox = inboxes.length > 1
     const purposeTags = purposeTagsForInboxes(inboxes, providerByEmail, tags)
-    const tagsList = [
-      ...(multiInbox ? ["multi-inbox"] : []),
-      ...purposeTags.map((p) => p),
-    ]
+    const tagsList = [...(multiInbox ? ["multi-inbox"] : []), ...purposeTags.map((p) => p)]
     groups.push({
       key,
       company: pickCompanyName(
@@ -279,9 +267,8 @@ export function inboxSummary(userId = getLocalUserId()) {
       tag: tags[p.id] ?? null,
       accountCount: accounts.filter((a) => a.provider_id === p.id).length,
       subscriptionCount: subs.filter((s) => s.provider_id === p.id).length,
-      activeSubscriptionCount: subs.filter(
-        (s) => s.provider_id === p.id && s.status === "active"
-      ).length,
+      activeSubscriptionCount: subs.filter((s) => s.provider_id === p.id && s.status === "active")
+        .length,
     })),
     sharedAccountGroups,
     sharedSubscriptionGroups,

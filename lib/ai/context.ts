@@ -122,9 +122,7 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
     if (multiSubs.length > 0) {
       lines.push(
         "Subscriptions on multiple inboxes: " +
-          multiSubs
-            .map((g) => `${g.company} → ${g.inboxes.join(" + ")}`)
-            .join("; ") +
+          multiSubs.map((g) => `${g.company} → ${g.inboxes.join(" + ")}`).join("; ") +
           "."
       )
     }
@@ -152,9 +150,7 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
     if (multi.length > 0) {
       lines.push(
         "Services on multiple inboxes: " +
-          multi
-            .map((g) => `${g.company} → ${g.inboxes.join(" + ")}`)
-            .join("; ") +
+          multi.map((g) => `${g.company} → ${g.inboxes.join(" + ")}`).join("; ") +
           "."
       )
     }

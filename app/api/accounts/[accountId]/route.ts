@@ -38,9 +38,7 @@ export async function PATCH(
       company: before.company,
       domain: before.domain,
       siblingDomains: siblings.map((s) => s.domain).filter((d): d is string => Boolean(d)),
-      siblingCompanies: siblings.length
-        ? [before.company]
-        : [],
+      siblingCompanies: siblings.length ? [before.company] : [],
     })
   }
 

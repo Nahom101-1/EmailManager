@@ -28,6 +28,24 @@ describe("parseAmount", () => {
       billingCycle: null,
     })
   })
+
+  it("parses was charged and total due patterns", () => {
+    expect(parseAmount("You were charged $15.49 for your plan")).toEqual({
+      amount: 15.49,
+      billingCycle: null,
+    })
+    expect(parseAmount("Total due: €42.00")).toEqual({
+      amount: 42,
+      billingCycle: "monthly",
+    })
+  })
+
+  it("parses renews-on amounts", () => {
+    expect(parseAmount("Your membership renews on Apr 1 for $9.99")).toEqual({
+      amount: 9.99,
+      billingCycle: "monthly",
+    })
+  })
 })
 
 describe("extractSenderEmail / extractDomain", () => {

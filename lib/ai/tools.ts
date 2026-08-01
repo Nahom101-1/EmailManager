@@ -381,29 +381,39 @@ export async function runAssistantTool(
       const acctGroups = listAccountGroups(getLocalUserId())
       const subGroups = listSubscriptionGroups(getLocalUserId())
 
-      const matchGroup = <T extends { company: string; inboxes: string[]; multiInbox: boolean; key: string }>(
+      const matchGroup = <
+        T extends { company: string; inboxes: string[]; multiInbox: boolean; key: string },
+      >(
         groups: T[]
       ) =>
         groups.filter((g) => {
-          if (companyQ && !g.company.toLowerCase().includes(companyQ) && !g.key.includes(companyQ.replace(/[^a-z0-9]/g, ""))) {
+          if (
+            companyQ &&
+            !g.company.toLowerCase().includes(companyQ) &&
+            !g.key.includes(companyQ.replace(/[^a-z0-9]/g, ""))
+          ) {
             return false
           }
           if (purpose && !g.inboxes.some((e) => purposeEmails.has(e.toLowerCase()))) return false
           return Boolean(companyQ || purpose)
         })
 
-      const accounts = matchGroup(acctGroups).slice(0, 12).map((g) => ({
-        company: g.company,
-        inboxes: g.inboxes,
-        multiInbox: g.multiInbox,
-        kind: "account" as const,
-      }))
-      const subscriptions = matchGroup(subGroups).slice(0, 12).map((g) => ({
-        company: g.company,
-        inboxes: g.inboxes,
-        multiInbox: g.multiInbox,
-        kind: "subscription" as const,
-      }))
+      const accounts = matchGroup(acctGroups)
+        .slice(0, 12)
+        .map((g) => ({
+          company: g.company,
+          inboxes: g.inboxes,
+          multiInbox: g.multiInbox,
+          kind: "account" as const,
+        }))
+      const subscriptions = matchGroup(subGroups)
+        .slice(0, 12)
+        .map((g) => ({
+          company: g.company,
+          inboxes: g.inboxes,
+          multiInbox: g.multiInbox,
+          kind: "subscription" as const,
+        }))
 
       return JSON.stringify({
         query: { company: companyQ || null, purpose },

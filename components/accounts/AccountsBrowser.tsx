@@ -370,8 +370,8 @@ export function AccountsBrowser({
       {(grouped ? filteredGroups.length : filteredAccounts.length) > visible && (
         <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
           <button className="btn sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
-            Show more (
-            {(grouped ? filteredGroups.length : filteredAccounts.length) - visible} remaining)
+            Show more ({(grouped ? filteredGroups.length : filteredAccounts.length) - visible}{" "}
+            remaining)
           </button>
         </div>
       )}

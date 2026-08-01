@@ -42,7 +42,11 @@ export function isNoiseCandidate(input: {
   headers?: Record<string, string>
 }): boolean {
   const labels = (input.labels ?? []).map((l) => l.toLowerCase())
-  if (input.headers?.["List-Unsubscribe"] || input.headers?.["List-ID"] || input.headers?.["List-Id"]) {
+  if (
+    input.headers?.["List-Unsubscribe"] ||
+    input.headers?.["List-ID"] ||
+    input.headers?.["List-Id"]
+  ) {
     return true
   }
   if (labels.some((l) => l.includes("category_promotions") || l.includes("category_updates"))) {

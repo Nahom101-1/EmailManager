@@ -40,8 +40,7 @@ export function AppShell({
 
           {TABS.map((tab) => {
             const active =
-              pathname === tab.href ||
-              (tab.href !== "/dashboard" && pathname.startsWith(tab.href))
+              pathname === tab.href || (tab.href !== "/dashboard" && pathname.startsWith(tab.href))
             return (
               <Link key={tab.href} href={tab.href} className={"tab-link" + (active ? " on" : "")}>
                 {tab.label}

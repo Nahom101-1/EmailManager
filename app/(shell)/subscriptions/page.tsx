@@ -57,7 +57,7 @@ export default async function SubscriptionsPage({
   const monthly = active
     .filter((s) => s.amount != null)
     .reduce(
-      (t, s) => t + (s.billing_cycle === "yearly" ? (s.amount ?? 0) / 12 : s.amount ?? 0),
+      (t, s) => t + (s.billing_cycle === "yearly" ? (s.amount ?? 0) / 12 : (s.amount ?? 0)),
       0
     )
 

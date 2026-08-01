@@ -302,7 +302,9 @@ a {
   color: var(--ink-3);
   font-weight: 500;
   font-size: 13.5px;
-  transition: background 0.1s, color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s;
 }
 .tab-link:hover {
   background: var(--surface-inset);
@@ -320,7 +322,9 @@ a {
 }
 
 /* search & misc topbar pieces */
-.topbar-spacer { flex: 1; }
+.topbar-spacer {
+  flex: 1;
+}
 .searchbox {
   display: flex;
   align-items: center;
@@ -333,7 +337,9 @@ a {
   color: var(--ink-3);
   font-size: 12.5px;
   width: 200px;
-  transition: border-color 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
 }
 .searchbox:focus-within {
   border-color: var(--border-strong);
@@ -368,7 +374,9 @@ a {
   color: var(--ink-2);
   font-weight: 500;
   font-size: 13px;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 .nav-item:hover {
   background: var(--surface-inset);

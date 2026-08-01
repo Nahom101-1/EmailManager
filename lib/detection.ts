@@ -175,9 +175,19 @@ export function parseAmount(text: string): {
     [new RegExp(`${money}\\s*${num}\\s+per\\s+(?:mo(?:nth)?)`, "i"), "monthly"],
     [new RegExp(`${money}\\s*${num}\\s*\\/\\s*(?:yr|year|annual(?:ly)?)`, "i"), "yearly"],
     [new RegExp(`${money}\\s*${num}\\s+per\\s+(?:yr|year)`, "i"), "yearly"],
-    [new RegExp(`(?:was\\s+)?charged\\s+${money}\\s*${num}\\s+(monthly|annually|yearly)?`, "i"), null],
-    [new RegExp(`(?:total\\s+due|amount\\s+due|balance\\s+due)[^$€£0-9]{0,24}${money}\\s*${num}`, "i"), "monthly"],
-    [new RegExp(`(?:renews?\\s+on|renewal)[^$€£0-9]{0,40}${money}\\s*${num}`, "i"), "monthly"],
+    [
+      new RegExp(`(?:was\\s+)?charged\\s+${money}\\s*${num}\\s+(monthly|annually|yearly)?`, "i"),
+      null,
+    ],
+    [
+      new RegExp(
+        `(?:total\\s+due|amount\\s+due|balance\\s+due)[^$€£0-9]{0,24}${money}\\s*${num}`,
+        "i"
+      ),
+      "monthly",
+    ],
+    [new RegExp(`(?:renews?\\s+on|renewal)[\\s\\S]{0,48}?${money}\\s*${num}`, "i"), "monthly"],
+    [new RegExp(`for\\s+${money}\\s*${num}`, "i"), null],
     [new RegExp(`${money}\\s*${num}\\s+(monthly|annually|yearly)`, "i"), null],
     [new RegExp(`subscription[^$€£]{0,40}${money}\\s*${num}`, "i"), "monthly"],
     [new RegExp(`total[^$€£]{0,20}${money}\\s*${num}`, "i"), "monthly"],

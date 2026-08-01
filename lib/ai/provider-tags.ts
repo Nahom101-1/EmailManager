@@ -50,13 +50,14 @@ export async function suggestProviderTags(input?: {
           .map(
             (s) =>
               `Inbox ${s.id} <${s.email}>\n` +
-              (s.samples.length ? s.samples.map((m) => `  - ${m}`).join("\n") : "  (no recent mail)")
+              (s.samples.length
+                ? s.samples.map((m) => `  - ${m}`).join("\n")
+                : "  (no recent mail)")
           )
           .join("\n\n")
-      const text = await callClaude(
-        "You classify personal email inboxes by purpose. JSON only.",
-        [{ role: "user", content: prompt }]
-      )
+      const text = await callClaude("You classify personal email inboxes by purpose. JSON only.", [
+        { role: "user", content: prompt },
+      ])
       const match = text.match(/\{[\s\S]*\}/)
       if (match) {
         const parsed = JSON.parse(match[0]) as {

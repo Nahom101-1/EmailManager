@@ -137,8 +137,7 @@ export function findEmailByContentFp(
     `
     )
     .get(providerId, contentFp, excludeEmailId ?? null, excludeEmailId ?? null) as
-    | { emailId: string; clusterId: string | null }
-    | undefined
+    { emailId: string; clusterId: string | null } | undefined
   return row ?? null
 }
 

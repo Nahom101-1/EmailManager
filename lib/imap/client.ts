@@ -123,7 +123,12 @@ export async function fetchEmails(
         return { emails, nextOffset: 0, complete: true, considered: 0 }
       }
 
-      const { page: uids, nextOffset, complete, considered } = pageImapUids({
+      const {
+        page: uids,
+        nextOffset,
+        complete,
+        considered,
+      } = pageImapUids({
         uids: searchResults,
         offset,
         pageSize: maxMessages,

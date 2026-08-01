@@ -6,11 +6,11 @@ import { cloudAiConfigured } from "@/lib/ai/client"
 import { AI_SCOPES } from "@/lib/ai/scopes"
 
 const SUGGESTED_PROMPTS = [
-  "What should I deal with first?",
-  "What can I safely ignore today?",
-  "Anything to review in my subscriptions?",
-  "Summarize my day in one line",
-  "Which accounts need a closer look?",
+  "What should I focus on today?",
+  "Which messages need replies?",
+  "What am I waiting for?",
+  "Do I have more than one Netflix account?",
+  "Draft a reply — remind me it will not send",
 ]
 
 function greetingForNow(): string {
@@ -33,10 +33,15 @@ function localSummary(briefing: ReturnType<typeof buildBriefing>): string {
   )
 }
 
-export default async function AssistantPage() {
+export default async function AssistantPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
   await connection()
   const settings = getAiSettings()
   const briefing = buildBriefing()
+  const sp = await searchParams
 
   return (
     <AssistantClient
@@ -49,6 +54,7 @@ export default async function AssistantPage() {
       cloudConfigured={cloudAiConfigured()}
       ollamaConfigured={Boolean(process.env.OLLAMA_MODEL)}
       suggestedPrompts={SUGGESTED_PROMPTS}
+      initialQuery={typeof sp.q === "string" ? sp.q : ""}
     />
   )
 }

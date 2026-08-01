@@ -1,5 +1,6 @@
+import Link from "next/link"
 import { connection } from "next/server"
-import { Card, Icon, Provider, StatusBadge } from "@/components/ui"
+import { Btn, Card, Icon, Provider, StatusBadge } from "@/components/ui"
 import { AppearanceCard } from "@/components/settings/AppearanceCard"
 import { AiSettingsCard } from "@/components/settings/AiSettingsCard"
 import { ResetDataButton } from "@/components/settings/ResetDataButton"
@@ -63,12 +64,34 @@ export default async function SettingsPage() {
           <div className="page-eyebrow">Settings</div>
           <h1 className="page-title">Settings</h1>
           <p className="page-sub">
-            Manage local data, security, and connected services. Everything runs on this machine.
+            Manage local data, security, and connected services. Connect and Inbox Sync live here
+            under onboarding — everything runs on this machine.
           </p>
         </div>
       </div>
 
       <div className="grid" style={{ gap: 18 }}>
+        <Card>
+          <div className="card-head">
+            <h3 className="center gap8">
+              <Icon name="connect" size={15} className="muted" />
+              Mailboxes
+            </h3>
+          </div>
+          <div className="list">
+            <Row icon="connect" title="Connect a mailbox" desc="Google OAuth or manual IMAP">
+              <Link href="/connect">
+                <Btn size="xs">Open</Btn>
+              </Link>
+            </Row>
+            <Row icon="sync" title="Inbox sync" desc="Run or resume a scan; progress is saved">
+              <Link href="/inbox-sync">
+                <Btn size="xs">Open</Btn>
+              </Link>
+            </Row>
+          </div>
+        </Card>
+
         <AppearanceCard />
 
         <AiSettingsCard

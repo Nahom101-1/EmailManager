@@ -1,11 +1,14 @@
 import Link from "next/link"
 import { connection } from "next/server"
-import { Btn, Icon, StatusBadge, Tile, fmt, monogram } from "@/components/ui"
+import { Btn, Icon, StatusBadge } from "@/components/ui"
 import { SyncAllButton } from "@/components/shell/SyncButtons"
 import { InboxSyncActions } from "@/components/shell/InboxSyncActions"
+import { FocusCard } from "@/components/focus/FocusCard"
+import { FocusSection } from "@/components/focus/FocusSection"
 import {
   getDashboardStats,
   getLocalUserId,
+  listAccounts,
   listProviders,
   listSubscriptions,
   reclaimStaleSyncRuns,
@@ -13,12 +16,9 @@ import {
 } from "@/lib/db/local"
 import { buildBriefing } from "@/lib/ai/context"
 import { getUpcomingBills } from "@/lib/db/intelligence"
+import { buildTodayFocus } from "@/lib/ui/today-focus"
 
 type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
-
-function daysUntil(iso: string): number {
-  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000)
-}
 
 const R: React.CSSProperties = { borderRadius: "var(--radius)" }
 const R_TOP: React.CSSProperties = { borderRadius: "var(--radius) var(--radius) 0 0" }
@@ -39,22 +39,48 @@ export default async function DashboardPage() {
   const providers = listProviders(userId)
   const stats = getDashboardStats(userId)
   const subs = listSubscriptions(userId) as SubRow[]
+  const accounts = listAccounts(userId)
   const briefing = buildBriefing(userId)
   const bills = getUpcomingBills(30)
+  const today = buildTodayFocus({
+    briefing,
+    emailCount: stats.emailCount,
+    subs,
+    accounts,
+    bills,
+  })
 
   if (providers.length === 0) {
     return (
-      <div className="page fade-in">
+      <div className="page page-wide fade-in">
         <p className="page-eyebrow">Today</p>
         <h1 className="page-title">Welcome to LifeOS.</h1>
-        <p className="page-sub" style={{ marginBottom: 32 }}>
-          Connect an inbox to get started. LifeOS reads email metadata to surface subscriptions and
-          accounts — everything stays on this machine.
+        <p className="page-sub" style={{ marginBottom: 20 }}>
+          Connect a mailbox to get started. Today will show what needs you, what can wait, and what
+          changed — with evidence, not vanity unread counts.
         </p>
+        <div
+          className="focus-card"
+          style={{ marginBottom: 24, opacity: 0.85 }}
+          aria-hidden="true"
+        >
+          <div className="focus-card-title-row">
+            <h3 className="focus-card-title">Reply to landlord about lease document</h3>
+            <span className="focus-priority focus-priority-high">
+              <span className="focus-priority-mark" />
+              <span className="focus-priority-label">high</span>
+            </span>
+          </div>
+          <p className="focus-card-explain">Sample of what a Focus card will look like.</p>
+          <p className="focus-card-why">
+            <span className="focus-card-why-label">Why it matters:</span> deadline Fri · evidence
+            linked · confidence shown honestly
+          </p>
+        </div>
         <div className="btn-row">
           <Link href="/connect">
             <Btn variant="primary" icon="connect">
-              Connect Google
+              Connect a mailbox
             </Btn>
           </Link>
           <Link href="/connect">
@@ -66,163 +92,104 @@ export default async function DashboardPage() {
   }
 
   const syncTargets = providers.map((p) => ({ id: p.id, email: p.email }))
-  const actionItems = briefing.dealFirst
-    .slice(0, 6)
-    .map((i) => ({ title: i.t, meta: i.meta, to: "/subscriptions" }))
-  const isPaid = (s: SubRow) =>
-    s.kind === "paid" || ((s.kind == null || s.kind === undefined) && s.category !== "newsletter")
-  const paidSubs = subs.filter(isPaid)
-  const activeSubs = paidSubs.filter((s) => s.status === "active")
-  const reviewCount = paidSubs.filter((s) => s.status === "unknown").length
-  const monthly = activeSubs
-    .filter((s) => s.amount != null)
-    .reduce(
-      (t, s) => t + (s.billing_cycle === "yearly" ? (s.amount ?? 0) / 12 : (s.amount ?? 0)),
-      0
-    )
-  const emailLabel =
-    stats.emailCount >= 1000 ? (stats.emailCount / 1000).toFixed(1) + "k" : String(stats.emailCount)
+  const hasFocus =
+    today.now.length + today.thisWeek.length + today.waiting.length + today.forgotten.length > 0
+  const digestParts = [
+    today.lowPriority.newsletters > 0
+      ? `${today.lowPriority.newsletters} newsletters`
+      : null,
+    today.lowPriority.receipts > 0 ? `${today.lowPriority.receipts} receipts` : null,
+    today.lowPriority.other > 0 ? `${today.lowPriority.other} low-signal items` : null,
+  ].filter(Boolean)
 
   return (
-    <div className="page fade-in">
-      {/* header */}
+    <div className="page page-wide fade-in">
       <div
         style={{
           display: "flex",
           alignItems: "flex-start",
           justifyContent: "space-between",
-          marginBottom: 36,
+          marginBottom: 28,
           gap: 16,
         }}
       >
         <div>
           <p className="page-eyebrow">Today</p>
           <h1 className="page-title" style={{ fontSize: 26 }}>
-            {stats.emailCount > 0 ? `${emailLabel} emails scanned` : "Ready to scan"}
+            What needs you now
           </h1>
-          <p className="page-sub">
-            {monthly > 0 ? (
+          <p className="overload-signal">
+            {today.overload.messages > 0 ? (
               <>
-                <span style={{ fontWeight: 600, color: "var(--ink)" }}>
-                  ${Math.round(monthly)}/mo
-                </span>
-                {" across "}
-                {activeSubs.length} subscription{activeSubs.length !== 1 ? "s" : ""}
-                {reviewCount > 0 && (
-                  <span style={{ color: "var(--st-warn)" }}> · {reviewCount} to review</span>
-                )}
+                {today.overload.messages.toLocaleString()} messages scanned,{" "}
+                <strong style={{ color: "var(--ink)", fontWeight: 600 }}>
+                  {today.overload.needYou} seem to need you
+                </strong>
+                .
               </>
-            ) : reviewCount > 0 ? (
-              <span style={{ color: "var(--st-warn)" }}>
-                {reviewCount} subscription{reviewCount !== 1 ? "s" : ""} to review
-              </span>
             ) : (
-              "No subscriptions detected yet"
+              "No messages scanned yet — sync an inbox to start."
             )}
           </p>
         </div>
         <SyncAllButton targets={syncTargets} />
       </div>
 
-      {/* needs attention */}
-      {actionItems.length > 0 && (
-        <Section label="Needs attention" mb={36}>
-          {actionItems.map((item, i) => (
-            <Link
-              key={i}
-              href={item.to}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "13px 16px",
-                background: "var(--surface)",
-                ...rowRadius(i, actionItems.length),
-                border: "1px solid var(--border)",
-                marginTop: i > 0 ? -1 : 0,
-                textDecoration: "none",
-              }}
-            >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: "var(--st-warn)",
-                  flex: "none",
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 500,
-                    color: "var(--ink)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {item.title}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{item.meta}</div>
-              </div>
-              <Icon name="chevR" size={14} style={{ color: "var(--ink-faint)", flex: "none" }} />
-            </Link>
+      {today.now.length > 0 && (
+        <FocusSection id="now" label="Now" count={today.now.length}>
+          {today.now.map((item) => (
+            <FocusCard key={item.id} item={item} />
           ))}
-        </Section>
+        </FocusSection>
       )}
 
-      {/* bills coming up */}
-      {bills.length > 0 && (
-        <Section label="Bills coming up" mb={36}>
-          {bills.map((bill, i) => {
-            const days = daysUntil(bill.due_date)
-            const daysLabel = days <= 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`
-            return (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: "13px 16px",
-                  background: "var(--surface)",
-                  ...rowRadius(i, bills.length),
-                  border: "1px solid var(--border)",
-                  marginTop: i > 0 ? -1 : 0,
-                }}
-              >
-                <Tile mono={monogram(bill.vendor ?? "?")} size="sm" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink)" }}>
-                    {bill.vendor ?? "Unknown"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-                    {daysLabel}
-                    {bill.provider_email ? ` · ${bill.provider_email}` : ""}
-                  </div>
-                </div>
-                {bill.amount != null && (
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "var(--ink-2)",
-                    }}
-                  >
-                    ${fmt(bill.amount)}/{bill.billing_cycle === "yearly" ? "yr" : "mo"}
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </Section>
+      {today.thisWeek.length > 0 && (
+        <FocusSection id="week" label="This week" count={today.thisWeek.length}>
+          {today.thisWeek.map((item) => (
+            <FocusCard key={item.id} item={item} />
+          ))}
+        </FocusSection>
       )}
 
-      {/* all clear */}
-      {actionItems.length === 0 && bills.length === 0 && (
+      {today.waiting.length > 0 && (
+        <FocusSection id="waiting" label="Waiting for others" count={today.waiting.length}>
+          {today.waiting.map((item) => (
+            <FocusCard key={item.id} item={item} />
+          ))}
+        </FocusSection>
+      )}
+
+      {today.forgotten.length > 0 && (
+        <FocusSection
+          id="forgotten"
+          label="Possibly forgotten"
+          count={today.forgotten.length}
+          defaultOpen={today.now.length === 0}
+        >
+          {today.forgotten.map((item) => (
+            <FocusCard key={item.id} item={item} />
+          ))}
+        </FocusSection>
+      )}
+
+      {digestParts.length > 0 && (
+        <FocusSection id="low" label="Low-priority" count={digestParts.length} defaultOpen={false}>
+          <div className="digest-row">
+            <Icon name="archive" size={15} style={{ color: "var(--ink-3)", flex: "none" }} />
+            <span>
+              <strong>Digest</strong> · {digestParts.join(" · ")}
+            </span>
+            <span style={{ flex: 1 }} />
+            <Link href="/history">
+              <Btn size="xs" variant="ghost">
+                Review later
+              </Btn>
+            </Link>
+          </div>
+        </FocusSection>
+      )}
+
+      {!hasFocus && (
         <div
           style={{
             padding: "20px 16px",
@@ -231,14 +198,14 @@ export default async function DashboardPage() {
             border: "1px solid var(--border)",
             color: "var(--ink-3)",
             fontSize: 13.5,
-            marginBottom: 36,
+            marginBottom: 28,
           }}
         >
           Nothing needs you right now.
           {stats.emailCount === 0 && (
             <>
               {" "}
-              <Link href="/connect" style={{ color: "var(--accent)" }}>
+              <Link href="/inbox-sync" style={{ color: "var(--accent)" }}>
                 Run a sync to start scanning.
               </Link>
             </>
@@ -246,8 +213,10 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* inboxes */}
-      <Section label="Your inboxes">
+      <section style={{ marginTop: 12 }}>
+        <div className="section-label" style={{ marginTop: 0, marginBottom: 8 }}>
+          Your inboxes
+        </div>
         {providers.map((p, i) => (
           <div
             key={p.id}
@@ -306,26 +275,7 @@ export default async function DashboardPage() {
             </Btn>
           </Link>
         </div>
-      </Section>
+      </section>
     </div>
-  )
-}
-
-function Section({
-  label,
-  children,
-  mb,
-}: {
-  label: string
-  children: React.ReactNode
-  mb?: number
-}) {
-  return (
-    <section style={{ marginBottom: mb ?? 0 }}>
-      <div className="section-label" style={{ marginBottom: 8 }}>
-        {label}
-      </div>
-      {children}
-    </section>
   )
 }

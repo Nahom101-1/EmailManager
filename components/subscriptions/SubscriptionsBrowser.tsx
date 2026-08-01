@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, Conf, Icon, StatusBadge, Tile, fmt, monogram } from "@/components/ui"
 import { useTheme } from "@/components/theme/ThemeProvider"
@@ -9,14 +10,44 @@ import type { CompanyGroup, SubscriptionGroupInstance } from "@/lib/identity/gro
 
 type SubRow = LocalSubscription
 
-const KIND_FILTERS: Array<{ v: "all" | SubscriptionKind; label: string }> = [
-  { v: "all", label: "All types" },
-  { v: "paid", label: "Paid plans" },
-  { v: "mailing_list", label: "Email lists" },
+/** Money view tabs (UI_UX_SPEC §6). Mailing lists stay separate from spend. */
+type MoneyTab =
+  | "active_paid"
+  | "possibly_active"
+  | "trials"
+  | "price_changes"
+  | "payment_failures"
+  | "refunds"
+  | "duplicates"
+  | "mailing_lists"
+
+const MONEY_TABS: Array<{ v: MoneyTab; label: string; ready: boolean }> = [
+  { v: "active_paid", label: "Active paid", ready: true },
+  { v: "possibly_active", label: "Possibly active", ready: true },
+  { v: "trials", label: "Trials", ready: true },
+  { v: "price_changes", label: "Price increases", ready: true },
+  { v: "payment_failures", label: "Payment failures", ready: false },
+  { v: "refunds", label: "Refunds", ready: false },
+  { v: "duplicates", label: "Duplicates", ready: true },
+  { v: "mailing_lists", label: "Mailing lists", ready: true },
 ]
 
+export type MoneyTrialSignal = {
+  emailId: string
+  vendor: string | null
+  due_date: string
+}
+
+export type MoneyPriceSignal = {
+  emailId: string
+  vendor: string
+  previousAmount: number
+  newAmount: number
+  currency: string | null
+}
+
 const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
-  { v: "all", label: "All" },
+  { v: "all", label: "All statuses" },
   { v: "unknown", label: "Needs review" },
   { v: "active", label: "Active" },
   { v: "cancelled", label: "Cancelled" },
@@ -42,39 +73,102 @@ export function SubscriptionsBrowser({
   groups,
   inboxes,
   initialInbox = "all",
+  trials = [],
+  priceChanges = [],
 }: {
   subscriptions: SubRow[]
   groups: CompanyGroup<SubscriptionGroupInstance>[]
   inboxes: string[]
   initialInbox?: string
+  trials?: MoneyTrialSignal[]
+  priceChanges?: MoneyPriceSignal[]
 }) {
   const router = useRouter()
   const { layout, set } = useTheme()
-  const [kindFilter, setKindFilter] = useState<"all" | SubscriptionKind>("paid")
+  const [moneyTab, setMoneyTab] = useState<MoneyTab>("active_paid")
   const [filter, setFilter] = useState<"all" | SubscriptionStatus>("all")
   const [inbox, setInbox] = useState(initialInbox)
   const [grouped, setGrouped] = useState(inboxes.length >= 2)
   const [pending, setPending] = useState<string | null>(null)
   const [visible, setVisible] = useState(PAGE_SIZE)
 
-  const kindCounts = useMemo(() => {
-    const m = { all: subscriptions.length, paid: 0, mailing_list: 0 }
-    for (const s of subscriptions) m[subKind(s)] += 1
+  const duplicateKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const g of groups) {
+      if (g.instances.length > 1 || g.multiInbox) keys.add(g.key)
+    }
+    return keys
+  }, [groups])
+
+  const tabCounts = useMemo(() => {
+    const m: Record<MoneyTab, number> = {
+      active_paid: 0,
+      possibly_active: 0,
+      trials: trials.length,
+      price_changes: priceChanges.length,
+      payment_failures: 0,
+      refunds: 0,
+      duplicates: 0,
+      mailing_lists: 0,
+    }
+    for (const s of subscriptions) {
+      const kind = subKind(s)
+      if (kind === "mailing_list") m.mailing_lists += 1
+      else if (s.status === "active") m.active_paid += 1
+      else if (s.status === "unknown") m.possibly_active += 1
+    }
+    for (const g of groups) {
+      if (g.instances.length > 1 || g.multiInbox) {
+        const paidInst = g.instances.filter((inst) => {
+          const row = subscriptions.find((s) => s.id === inst.id)
+          return row ? subKind(row) === "paid" : true
+        })
+        if (paidInst.length > 1 || (g.multiInbox && paidInst.length > 0)) m.duplicates += 1
+      }
+    }
     return m
-  }, [subscriptions])
+  }, [subscriptions, groups, trials.length, priceChanges.length])
 
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const s of subscriptions) {
-      if (kindFilter !== "all" && subKind(s) !== kindFilter) continue
+      if (moneyTab === "mailing_lists" && subKind(s) !== "mailing_list") continue
+      if (moneyTab !== "mailing_lists" && subKind(s) === "mailing_list") continue
       m.set(s.status, (m.get(s.status) ?? 0) + 1)
     }
     return m
-  }, [subscriptions, kindFilter])
+  }, [subscriptions, moneyTab])
+
+  function matchesMoneyTab(s: SubRow): boolean {
+    const kind = subKind(s)
+    switch (moneyTab) {
+      case "mailing_lists":
+        return kind === "mailing_list"
+      case "active_paid":
+        return kind === "paid" && s.status === "active"
+      case "possibly_active":
+        return kind === "paid" && s.status === "unknown"
+      case "duplicates":
+        if (kind !== "paid") return false
+        return groups.some(
+          (g) =>
+            duplicateKeys.has(g.key) &&
+            (g.instances.length > 1 || g.multiInbox) &&
+            g.instances.some((i) => i.id === s.id)
+        )
+      case "trials":
+      case "price_changes":
+      case "payment_failures":
+      case "refunds":
+        return false
+      default:
+        return true
+    }
+  }
 
   const filtered = useMemo(() => {
     return subscriptions.filter((s) => {
-      if (kindFilter !== "all" && subKind(s) !== kindFilter) return false
+      if (!matchesMoneyTab(s)) return false
       if (filter !== "all" && s.status !== filter) return false
       if (inbox !== "all") {
         const addr = (s.provider_email ?? s.email_used ?? "").toLowerCase()
@@ -82,7 +176,8 @@ export function SubscriptionsBrowser({
       }
       return true
     })
-  }, [subscriptions, filter, inbox, kindFilter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- matchesMoneyTab closes over moneyTab/groups
+  }, [subscriptions, filter, inbox, moneyTab, groups, duplicateKeys])
 
   const filteredGroups = useMemo(() => {
     return groups
@@ -90,19 +185,21 @@ export function SubscriptionsBrowser({
         ...g,
         instances: g.instances.filter((inst) => {
           const row = subscriptions.find((s) => s.id === inst.id)
-          if (!row) return true
-          return kindFilter === "all" || subKind(row) === kindFilter
+          if (!row) return false
+          return matchesMoneyTab(row)
         }),
       }))
       .filter((g) => {
         if (g.instances.length === 0) return false
+        if (moneyTab === "duplicates" && !(g.instances.length > 1 || g.multiInbox)) return false
         if (filter !== "all" && g.status !== filter) return false
         if (inbox !== "all") {
           if (!g.inboxes.some((e) => e.toLowerCase() === inbox.toLowerCase())) return false
         }
         return true
       })
-  }, [groups, filter, inbox, kindFilter, subscriptions])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, filter, inbox, moneyTab, subscriptions, duplicateKeys])
 
   const shown = filtered.slice(0, visible)
   const shownGroups = filteredGroups.slice(0, visible)
@@ -123,33 +220,101 @@ export function SubscriptionsBrowser({
 
   return (
     <div>
-      <div className="btn-row mb14" style={{ gap: 7, flexWrap: "wrap" }}>
-        {KIND_FILTERS.map((f) => (
+      <div className="btn-row mb14" style={{ gap: 7, flexWrap: "wrap" }} role="tablist" aria-label="Money views">
+        {MONEY_TABS.map((f) => (
           <button
             key={f.v}
-            className={"chip btn-chip" + (kindFilter === f.v ? " on" : "")}
+            role="tab"
+            aria-selected={moneyTab === f.v}
+            className={"chip btn-chip" + (moneyTab === f.v ? " on" : "")}
             onClick={() => {
-              setKindFilter(f.v)
+              setMoneyTab(f.v)
               setVisible(PAGE_SIZE)
+              if (f.v === "mailing_lists" || f.v === "active_paid" || f.v === "possibly_active") {
+                setFilter("all")
+              }
             }}
           >
             {f.label}
             <span className="num faint" style={{ fontSize: 11 }}>
-              {kindCounts[f.v]}
+              {f.ready ? tabCounts[f.v] : "—"}
             </span>
           </button>
         ))}
       </div>
 
+      {!MONEY_TABS.find((t) => t.v === moneyTab)?.ready && (
+        <div className="digest-row mb14">
+          <span className="uncertain-chip">not detected yet</span>
+          <span>
+            Payment failures and refunds tabs are ready in the UI; rows appear when extraction
+            covers those intents — we will not invent them.
+          </span>
+        </div>
+      )}
+
+      {moneyTab === "mailing_lists" && (
+        <p className="page-sub" style={{ marginBottom: 14, marginTop: 0 }}>
+          Mailing lists are separate from spend and never counted in monthly cost.
+        </p>
+      )}
+
+      {moneyTab === "trials" && (
+        <div className="focus-section-body mb14">
+          {trials.length === 0 ? (
+            <div className="digest-row">
+              <span className="uncertain-chip">no trials in window</span>
+              <span>No ending-trial signals in the next ~14 days from stored intelligence.</span>
+            </div>
+          ) : (
+            trials.map((t) => (
+              <Link key={t.emailId} href={`/emails/${t.emailId}`} className="digest-row">
+                <strong>{t.vendor ?? "Unknown vendor"}</strong>
+                <span className="muted">trial signal · due {t.due_date}</span>
+                <span style={{ flex: 1 }} />
+                <span className="muted">Evidence ▸</span>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+
+      {moneyTab === "price_changes" && (
+        <div className="focus-section-body mb14">
+          {priceChanges.length === 0 ? (
+            <div className="digest-row">
+              <span className="uncertain-chip">none observed</span>
+              <span>No amount deltas between receipt/renewal extracts yet.</span>
+            </div>
+          ) : (
+            priceChanges.map((p) => (
+              <Link
+                key={p.emailId + String(p.newAmount)}
+                href={`/emails/${p.emailId}`}
+                className="digest-row"
+              >
+                <strong>{p.vendor}</strong>
+                <span className="muted">
+                  {p.previousAmount} → {p.newAmount}
+                  {p.currency ? ` ${p.currency}` : ""}
+                </span>
+                <span style={{ flex: 1 }} />
+                <span className="muted">Evidence ▸</span>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
+
+      {moneyTab !== "trials" &&
+        moneyTab !== "price_changes" &&
+        moneyTab !== "payment_failures" &&
+        moneyTab !== "refunds" && (
+        <>
       <div className="between mb14" style={{ alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <div className="btn-row" style={{ gap: 7, flexWrap: "wrap" }}>
           {FILTERS.map((f) => {
-            const count =
-              f.v === "all"
-                ? kindFilter === "all"
-                  ? subscriptions.length
-                  : kindCounts[kindFilter]
-                : (counts.get(f.v) ?? 0)
+            const count = f.v === "all" ? tabCounts[moneyTab] || filtered.length : (counts.get(f.v) ?? 0)
             return (
               <button
                 key={f.v}
@@ -488,6 +653,8 @@ export function SubscriptionsBrowser({
             Show more ({(grouped ? filteredGroups.length : filtered.length) - visible} remaining)
           </button>
         </div>
+      )}
+        </>
       )}
     </div>
   )

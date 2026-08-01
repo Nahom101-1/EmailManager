@@ -148,15 +148,39 @@ export function Provider({ provider, size = "" }: { provider: string; size?: "" 
   )
 }
 
-/* ---------- Confidence meter ---------- */
-export function Conf({ value }: { value: number }) {
+/* ---------- Confidence meter (UI_UX_SPEC §12: 4-dot + word, never colour-only) ---------- */
+export function confidenceWord(pct: number): "likely" | "possible" | "uncertain" {
+  if (pct >= 75) return "likely"
+  if (pct >= 50) return "possible"
+  return "uncertain"
+}
+
+export function Conf({
+  value,
+  showLabel = false,
+}: {
+  value: number
+  /** Show numeric % + word beside the dots */
+  showLabel?: boolean
+}) {
   const pct = value <= 1 ? value * 100 : value
-  const bars = Math.round((pct / 100) * 5)
+  const rounded = Math.round(pct)
+  const filled = Math.max(0, Math.min(4, Math.round((pct / 100) * 4)))
+  const word = confidenceWord(pct)
   return (
-    <span className={"conf" + (pct < 70 ? " low" : "")} title={Math.round(pct) + "% confidence"}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <i key={i} className={i < bars ? "on" : ""} />
+    <span
+      className={"conf" + (pct < 70 ? " low" : "")}
+      title={`${rounded}% confidence (${word})`}
+      aria-label={`${rounded}% confidence, ${word}`}
+    >
+      {[0, 1, 2, 3].map((i) => (
+        <i key={i} className={i < filled ? "on" : ""} aria-hidden="true" />
       ))}
+      {showLabel && (
+        <span className="conf-label">
+          {word} ({rounded}%)
+        </span>
+      )}
     </span>
   )
 }

@@ -50,7 +50,7 @@ export default async function Home() {
           </Link>
           <Link href="/dashboard">
             <Btn variant="primary" size="sm" iconR="chevR">
-              Open dashboard
+              Open Today
             </Btn>
           </Link>
         </div>
@@ -74,7 +74,7 @@ export default async function Home() {
           <div className="home-cta">
             <Link href="/dashboard">
               <Btn variant="primary" iconR="chevR">
-                Open dashboard
+                Open Today
               </Btn>
             </Link>
             <Link href="/connect">

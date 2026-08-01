@@ -1,11 +1,17 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { connection } from "next/server"
-import { Card, Icon, StatusBadge, Tile, monogram } from "@/components/ui"
+import { Btn, Card, Conf, Icon, StatusBadge, Tile, monogram } from "@/components/ui"
 import { AccountActions } from "@/components/accounts/AccountActions"
 import { AccountNotes } from "@/components/accounts/AccountNotes"
-import { getAccountById, getAccountNote, getLocalUserId, listSubscriptions } from "@/lib/db/local"
-import { findAccountSiblings } from "@/lib/identity/groups"
+import {
+  getAccountById,
+  getAccountNote,
+  getLocalUserId,
+  listAccounts,
+  listSubscriptions,
+} from "@/lib/db/local"
+import { listAccountGroups } from "@/lib/identity/groups"
 
 function fmtDate(value: string | null): string {
   if (!value) return "—"
@@ -13,6 +19,13 @@ function fmtDate(value: string | null): string {
   return Number.isNaN(d.getTime())
     ? value
     : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+}
+
+function statusHint(status: string): string {
+  if (status === "active") return "active"
+  if (status === "closed") return "inactive"
+  if (status === "ignore") return "ignored"
+  return "uncertain"
 }
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,12 +36,30 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   if (!account) notFound()
 
   const note = getAccountNote(id)
-  const confidence = account.confidence != null ? Math.round(account.confidence * 100) : null
-  const firstWord = account.company.toLowerCase().split(/\s+/)[0]
+  const groups = listAccountGroups(userId)
+  const group = groups.find((g) => g.instances.some((i) => i.id === id))
+  const siblings = group?.instances ?? [
+    {
+      id: account.id,
+      providerId: account.provider_id,
+      providerEmail: account.provider_email,
+      email: account.email,
+      status: account.status,
+      confidence: account.confidence,
+      domain: account.domain,
+      firstSeen: account.first_seen,
+      lastSeen: account.last_seen,
+    },
+  ]
+  const companyName = group?.company ?? account.company
+
+  const allAccounts = listAccounts(userId)
+  const accountById = new Map(allAccounts.map((a) => [a.id, a]))
+
+  const firstWord = companyName.toLowerCase().split(/\s+/)[0]
   const related = listSubscriptions(userId).filter(
     (s) => firstWord.length > 1 && s.company.toLowerCase().includes(firstWord)
   )
-  const siblings = findAccountSiblings(id, userId)
 
   const evidence: Array<{ time: string; title: string; desc: string; warn?: boolean }> = []
   if (account.source_subject || account.source_snippet) {
@@ -43,12 +74,13 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
       warn,
     })
   }
-  if (account.source)
+  if (account.source) {
     evidence.push({
       time: fmtDate(account.last_seen),
       title: account.source,
       desc: `Signal detected in ${account.provider_email ?? "your inbox"}`,
     })
+  }
   evidence.push({
     time: fmtDate(account.first_seen),
     title: "First seen",
@@ -56,39 +88,120 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   })
 
   return (
-    <div className="page fade-in" style={{ maxWidth: 1000 }}>
+    <div className="page page-wide fade-in">
       <div className="crumbs mb18">
         <Link href="/accounts" className="btn ghost xs">
           <Icon name="chevR" size={13} style={{ transform: "rotate(180deg)" }} />
           Accounts
         </Link>
         <Icon name="chevR" size={13} />
-        <span className="cur">{account.company}</span>
+        <span className="cur">{companyName}</span>
       </div>
 
       <div className="between mb18" style={{ alignItems: "flex-start" }}>
         <div className="center gap12">
-          <Tile mono={monogram(account.company)} size="lg" />
+          <Tile mono={monogram(companyName)} size="lg" />
           <div>
+            <p className="page-eyebrow">Organization</p>
             <h1 className="page-title" style={{ fontSize: 24 }}>
-              {account.company}
+              {companyName}
             </h1>
-            <div className="center gap8 mt6">
-              <StatusBadge status={account.status} />
-              {confidence != null && (
-                <span className="num faint" style={{ fontSize: 12 }}>
-                  {confidence}% match
-                </span>
-              )}
-              {account.email && (
-                <span className="mono faint" style={{ fontSize: 12 }}>
-                  {account.email}
-                </span>
-              )}
-            </div>
+            <p className="page-sub" style={{ marginTop: 4 }}>
+              {siblings.length} separate account{siblings.length === 1 ? "" : "s"}
+              {group?.multiInbox ? " across inboxes" : ""}. Org match never merges them.
+            </p>
           </div>
         </div>
-        <AccountActions accountId={account.id} status={account.status} />
+        <Link href="/review">
+          <Btn size="sm" variant="ghost">
+            Review queue
+          </Btn>
+        </Link>
+      </div>
+
+      <div className="org-tree mb18" role="list" aria-label="Accounts under organization">
+        {siblings.map((inst) => {
+          const full = accountById.get(inst.id)
+          const selected = inst.id === id
+          const conf =
+            inst.confidence == null
+              ? null
+              : inst.confidence <= 1
+                ? Math.round(inst.confidence * 100)
+                : Math.round(inst.confidence)
+          const mailbox = inst.providerEmail ?? inst.email ?? "unknown mailbox"
+          const lastYear = inst.lastSeen ? new Date(inst.lastSeen).getFullYear() : null
+          const paidHint = related.find(
+            (s) =>
+              (s.provider_email ?? "").toLowerCase() === (inst.providerEmail ?? "").toLowerCase()
+          )
+
+          return (
+            <div
+              key={inst.id}
+              role="listitem"
+              className={"org-account" + (selected ? " on" : "")}
+            >
+              <div className="org-account-head">
+                <Link href={`/accounts/${inst.id}`} className="org-account-title">
+                  Account · {mailbox}
+                </Link>
+                <StatusBadge status={inst.status} />
+                <span className="uncertain-chip">{statusHint(inst.status)}</span>
+                {conf != null && <Conf value={conf} showLabel />}
+              </div>
+              <div className="org-account-body">
+                <p>
+                  Paid plan:{" "}
+                  {paidHint
+                    ? `${paidHint.status === "active" ? "signal present" : paidHint.status} · ${paidHint.company}`
+                    : "no current evidence"}
+                  {" · "}
+                  Last activity: {lastYear ?? "unknown"}
+                  {" · "}
+                  Mailing:{" "}
+                  {full?.source?.toLowerCase().includes("newsletter")
+                    ? "possible list signal"
+                    : "not assessed"}
+                </p>
+                <div className="focus-card-actions" style={{ borderTop: 0, paddingTop: 4 }}>
+                  {full?.source_email_id ? (
+                    <Link href={`/emails/${full.source_email_id}`}>
+                      <Btn size="xs">Evidence ▸</Btn>
+                    </Link>
+                  ) : (
+                    <Btn size="xs" disabled>
+                      Evidence ▸
+                    </Btn>
+                  )}
+                  {selected ? (
+                    <>
+                      <Link href="/review">
+                        <Btn size="xs" variant="ghost">
+                          Review
+                        </Btn>
+                      </Link>
+                      <Btn size="xs" variant="ghost" disabled title="Use Review queue">
+                        Correct…
+                      </Btn>
+                    </>
+                  ) : (
+                    <Link href={`/accounts/${inst.id}`}>
+                      <Btn size="xs" variant="ghost">
+                        Open
+                      </Btn>
+                    </Link>
+                  )}
+                </div>
+              </div>
+              {selected && (
+                <div className="org-account-actions">
+                  <AccountActions accountId={account.id} status={account.status} />
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1.5fr 1fr", alignItems: "start" }}>
@@ -96,7 +209,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
           <Card>
             <div className="card-head">
               <h3>Timeline of evidence</h3>
-              <span className="sub">{evidence.length} signals</span>
+              <span className="sub">{evidence.length} signals · this account</span>
             </div>
             <div className="card-pad">
               <div className="timeline">
@@ -131,7 +244,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
 
         <div className="grid" style={{ gap: "var(--gap)" }}>
           <Card className="card-pad">
-            <h3 style={{ fontSize: 13, marginBottom: 4 }}>Details</h3>
+            <h3 style={{ fontSize: 13, marginBottom: 4 }}>Selected account</h3>
             <div className="kv">
               <span className="k">Linked email</span>
               <span className="v mono" style={{ fontSize: 11.5 }}>
@@ -142,23 +255,6 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
               <span className="k">Source inbox</span>
               <span className="v">{account.provider_email ?? "—"}</span>
             </div>
-            {siblings.length > 0 && (
-              <div className="kv" style={{ alignItems: "flex-start" }}>
-                <span className="k">Also found on</span>
-                <span className="v" style={{ display: "grid", gap: 4 }}>
-                  {siblings.map((s) => (
-                    <Link
-                      key={s.id}
-                      href={`/accounts/${s.id}`}
-                      className="mono"
-                      style={{ fontSize: 11.5 }}
-                    >
-                      {s.providerEmail ?? s.email ?? "other inbox"}
-                    </Link>
-                  ))}
-                </span>
-              </div>
-            )}
             <div className="kv">
               <span className="k">First seen</span>
               <span className="v mono">{fmtDate(account.first_seen)}</span>
@@ -169,36 +265,18 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
             </div>
             <div className="kv">
               <span className="k">Match confidence</span>
-              <span className="v">{confidence != null ? confidence + "%" : "—"}</span>
-            </div>
-          </Card>
-
-          <Card className="card-pad">
-            <h3 style={{ fontSize: 13, marginBottom: 8 }}>Signals detected</h3>
-            <div className="center gap6 wrap">
-              {account.source && (
-                <span className="chip" style={{ height: 24 }}>
-                  <Icon name="shield" size={12} />
-                  {account.source}
-                </span>
-              )}
-              {account.domain && (
-                <span className="chip" style={{ height: 24 }}>
-                  <Icon name="globe" size={12} />
-                  {account.domain}
-                </span>
-              )}
-              {account.email && (
-                <span className="chip" style={{ height: 24 }}>
-                  <Icon name="mail" size={12} />
-                  {account.email}
-                </span>
-              )}
-              {!account.source && !account.domain && !account.email && (
-                <span className="muted" style={{ fontSize: 12 }}>
-                  No additional signals captured.
-                </span>
-              )}
+              <span className="v">
+                {account.confidence != null ? (
+                  <Conf
+                    value={
+                      account.confidence <= 1 ? account.confidence * 100 : account.confidence
+                    }
+                    showLabel
+                  />
+                ) : (
+                  "—"
+                )}
+              </span>
             </div>
           </Card>
 
@@ -215,14 +293,16 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
                       <div className="row-title" style={{ fontSize: 12.5 }}>
                         {s.company}
                       </div>
+                      <div className="row-sub">
+                        {s.provider_email ?? "—"} · {s.status}
+                      </div>
                     </div>
-                    <span className="row-sub mono">{s.category ?? "recurring"}</span>
                   </Link>
                 ))}
               </div>
             ) : (
               <div className="card-pad muted" style={{ fontSize: 12.5 }}>
-                No linked subscriptions detected.
+                No linked subscription signals. Absence of payment is not proof of inactivity.
               </div>
             )}
           </Card>

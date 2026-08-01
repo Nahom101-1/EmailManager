@@ -21,6 +21,8 @@ interface Props {
   cloudConfigured: boolean
   ollamaConfigured: boolean
   suggestedPrompts: string[]
+  /** Prefill from ?q= — does not auto-send. */
+  initialQuery?: string
 }
 
 interface ChatMsg {
@@ -34,11 +36,12 @@ export function AssistantClient({
   cloudConfigured,
   ollamaConfigured,
   suggestedPrompts,
+  initialQuery = "",
 }: Props) {
   const [cloudEnabled, setCloudEnabled] = useState(initialCloudEnabled)
   const [summary, setSummary] = useState(initialSummary)
   const [msgs, setMsgs] = useState<ChatMsg[]>([])
-  const [input, setInput] = useState("")
+  const [input, setInput] = useState(initialQuery)
   const [busy, setBusy] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
 

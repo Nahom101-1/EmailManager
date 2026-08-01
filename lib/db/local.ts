@@ -609,6 +609,16 @@ export function getEmailIdMap(providerId: string, gmailMessageIds: string[]): Ma
   return map
 }
 
+function mapEmailRow(
+  row: Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }
+): LocalEmail {
+  return {
+    ...row,
+    labels: safeJsonParse<string[]>(row.labels, []),
+    headers: safeJsonParse<Record<string, string>>(row.headers, {}),
+  }
+}
+
 export function getEmailById(emailId: string): LocalEmail | null {
   const row = getDb()
     .prepare(
@@ -623,12 +633,31 @@ export function getEmailById(emailId: string): LocalEmail | null {
     (Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }) | undefined
 
   if (!row) return null
+  return mapEmailRow(row)
+}
 
-  return {
-    ...row,
-    labels: safeJsonParse<string[]>(row.labels, []),
-    headers: safeJsonParse<Record<string, string>>(row.headers, {}),
-  }
+/** Chronological thread messages for conversation view (same provider + thread_id). */
+export function listEmailsInThread(
+  providerId: string,
+  threadId: string | null | undefined,
+  limit = 40
+): LocalEmail[] {
+  if (!threadId) return []
+  const rows = getDb()
+    .prepare(
+      `
+      select e.*, p.email as provider_email, p.display_name as provider_name
+      from emails e
+      left join providers p on p.id = e.provider_id
+      where e.provider_id = ? and e.thread_id = ?
+      order by coalesce(e.date, e.created_at) asc
+      limit ?
+    `
+    )
+    .all(providerId, threadId, limit) as Array<
+    Omit<LocalEmail, "labels" | "headers"> & { labels: string; headers: string }
+  >
+  return rows.map(mapEmailRow)
 }
 
 /* ------------------------------------------------------------------ */

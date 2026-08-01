@@ -3,6 +3,7 @@ import { connection } from "next/server"
 import { Btn, Icon } from "@/components/ui"
 import { SubscriptionsBrowser } from "@/components/subscriptions/SubscriptionsBrowser"
 import { getLocalUserId, listProviders, listSubscriptions } from "@/lib/db/local"
+import { getEndingTrials, getPriceChanges } from "@/lib/db/intelligence"
 import { listSubscriptionGroups } from "@/lib/identity/groups"
 
 export default async function SubscriptionsPage({
@@ -21,9 +22,9 @@ export default async function SubscriptionsPage({
     return (
       <div className="page fade-in">
         <p className="page-eyebrow">Money</p>
-        <h1 className="page-title">Subscriptions</h1>
+        <h1 className="page-title">Money</h1>
         <p className="page-sub" style={{ marginBottom: 32 }}>
-          Recurring charges detected from receipts and billing emails.
+          Paid plans and billing signals from receipts — mailing lists stay separate.
         </p>
         <div
           style={{
@@ -106,6 +107,8 @@ export default async function SubscriptionsPage({
         groups={groups}
         inboxes={inboxes}
         initialInbox={sp.inbox && inboxes.includes(sp.inbox) ? sp.inbox : "all"}
+        trials={getEndingTrials(14)}
+        priceChanges={getPriceChanges(8)}
       />
     </div>
   )

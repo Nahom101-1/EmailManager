@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Card, Conf, Icon, StatusBadge, Tile, monogram } from "@/components/ui"
 import { useTheme } from "@/components/theme/ThemeProvider"
 import type { AccountStatus, LocalAccount } from "@/lib/db/local"
+import type { CompanyGroup, AccountGroupInstance } from "@/lib/identity/groups"
 
 const FILTERS: Array<{ v: "all" | AccountStatus; label: string }> = [
   { v: "all", label: "All" },
@@ -17,10 +18,22 @@ const FILTERS: Array<{ v: "all" | AccountStatus; label: string }> = [
 
 const PAGE_SIZE = 100
 
-export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
+export function AccountsBrowser({
+  accounts,
+  groups,
+  inboxes,
+  initialInbox = "all",
+}: {
+  accounts: LocalAccount[]
+  groups: CompanyGroup<AccountGroupInstance>[]
+  inboxes: string[]
+  initialInbox?: string
+}) {
   const router = useRouter()
   const { layout, set } = useTheme()
   const [filter, setFilter] = useState<"all" | AccountStatus>("all")
+  const [inbox, setInbox] = useState(initialInbox)
+  const [grouped, setGrouped] = useState(inboxes.length >= 2)
   const [pending, setPending] = useState<string | null>(null)
   const [visible, setVisible] = useState(PAGE_SIZE)
 
@@ -30,8 +43,29 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
     return m
   }, [accounts])
 
-  const filtered = accounts.filter((a) => filter === "all" || a.status === filter)
-  const shown = filtered.slice(0, visible)
+  const filteredAccounts = useMemo(() => {
+    return accounts.filter((a) => {
+      if (filter !== "all" && a.status !== filter) return false
+      if (inbox !== "all") {
+        const addr = (a.provider_email ?? a.email ?? "").toLowerCase()
+        if (addr !== inbox.toLowerCase()) return false
+      }
+      return true
+    })
+  }, [accounts, filter, inbox])
+
+  const filteredGroups = useMemo(() => {
+    return groups.filter((g) => {
+      if (filter !== "all" && g.status !== filter) return false
+      if (inbox !== "all") {
+        if (!g.inboxes.some((e) => e.toLowerCase() === inbox.toLowerCase())) return false
+      }
+      return true
+    })
+  }, [groups, filter, inbox])
+
+  const shownAccounts = filteredAccounts.slice(0, visible)
+  const shownGroups = filteredGroups.slice(0, visible)
 
   async function setStatus(id: string, status: AccountStatus) {
     setPending(id)
@@ -49,8 +83,8 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
 
   return (
     <div>
-      <div className="between mb14" style={{ alignItems: "flex-start" }}>
-        <div className="btn-row" style={{ gap: 7 }}>
+      <div className="between mb14" style={{ alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div className="btn-row" style={{ gap: 7, flexWrap: "wrap" }}>
           {FILTERS.map((f) => {
             const count = f.v === "all" ? accounts.length : (counts.get(f.v) ?? 0)
             return (
@@ -70,111 +104,213 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
             )
           })}
         </div>
-        <div className="seg">
-          {(["cards", "table"] as const).map((v) => (
-            <button key={v} className={layout === v ? "on" : ""} onClick={() => set("layout", v)}>
-              {v === "cards" ? "Cards" : "Table"}
-            </button>
-          ))}
+        <div className="btn-row" style={{ gap: 8 }}>
+          {inboxes.length > 1 && (
+            <div className="seg">
+              <button className={!grouped ? "on" : ""} onClick={() => setGrouped(false)}>
+                Flat
+              </button>
+              <button className={grouped ? "on" : ""} onClick={() => setGrouped(true)}>
+                Grouped
+              </button>
+            </div>
+          )}
+          <div className="seg">
+            {(["cards", "table"] as const).map((v) => (
+              <button key={v} className={layout === v ? "on" : ""} onClick={() => set("layout", v)}>
+                {v === "cards" ? "Cards" : "Table"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <Card>
-          <div className="empty">
-            <span className="ico">
-              <Icon name="filter" size={20} />
-            </span>
-            <h4>Nothing here</h4>
-            <p>No accounts match this filter.</p>
+      {inboxes.length > 0 && (
+        <div className="btn-row mb14" style={{ gap: 7, flexWrap: "wrap" }}>
+          <button
+            className={"chip btn-chip" + (inbox === "all" ? " on" : "")}
+            onClick={() => {
+              setInbox("all")
+              setVisible(PAGE_SIZE)
+            }}
+          >
+            All inboxes
+          </button>
+          {inboxes.map((email) => (
+            <button
+              key={email}
+              className={"chip btn-chip" + (inbox === email ? " on" : "")}
+              onClick={() => {
+                setInbox(email)
+                setVisible(PAGE_SIZE)
+              }}
+            >
+              <Icon name="mail" size={11} />
+              {email}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {grouped ? (
+        filteredGroups.length === 0 ? (
+          <Empty />
+        ) : (
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}
+          >
+            {shownGroups.map((g) => (
+              <Card
+                key={g.key}
+                className="card-pad"
+                style={{ display: "flex", flexDirection: "column", gap: 12 }}
+              >
+                <div className="between" style={{ alignItems: "flex-start" }}>
+                  <div className="center gap10">
+                    <Tile mono={monogram(g.company)} />
+                    <div>
+                      <div className="row-title">{g.company}</div>
+                      <div className="row-sub mono ellip" style={{ maxWidth: "24ch" }}>
+                        {g.domain ?? g.inboxes.join(" · ")}
+                      </div>
+                    </div>
+                  </div>
+                  <StatusBadge status={g.status} />
+                </div>
+
+                <div className="center gap6 wrap">
+                  {g.multiInbox && (
+                    <span className="chip" style={{ height: 22, fontSize: 11 }}>
+                      <Icon name="layers" size={11} />
+                      {g.inboxes.length} inboxes
+                    </span>
+                  )}
+                  {g.instances.map((inst) => (
+                    <Link
+                      key={inst.id}
+                      href={`/accounts/${inst.id}`}
+                      className="chip"
+                      style={{ height: 22, fontSize: 11, textDecoration: "none" }}
+                    >
+                      {inst.providerEmail ?? inst.email ?? "inbox"}
+                    </Link>
+                  ))}
+                </div>
+
+                {g.multiInbox && g.instances.length > 1 && (
+                  <div className="faint mono" style={{ fontSize: 11 }}>
+                    Also on{" "}
+                    {g.instances
+                      .slice(1)
+                      .map((i) => i.providerEmail ?? i.email)
+                      .filter(Boolean)
+                      .join(", ")}
+                  </div>
+                )}
+              </Card>
+            ))}
           </div>
-        </Card>
+        )
+      ) : filteredAccounts.length === 0 ? (
+        <Empty />
       ) : layout === "cards" ? (
         <div
           className="grid"
           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}
         >
-          {shown.map((a) => (
-            <Card
-              key={a.id}
-              className="card-pad"
-              style={{ display: "flex", flexDirection: "column", gap: 12 }}
-            >
-              <div className="between" style={{ alignItems: "flex-start" }}>
-                <Link href={`/accounts/${a.id}`} className="center gap10">
-                  <Tile mono={monogram(a.company)} />
-                  <div>
-                    <div className="row-title">{a.company}</div>
-                    <div className="row-sub mono ellip" style={{ maxWidth: "20ch" }}>
-                      {a.email ?? a.domain ?? ""}
+          {shownAccounts.map((a) => {
+            const siblings = groups
+              .find((g) => g.instances.some((i) => i.id === a.id))
+              ?.instances.filter((i) => i.id !== a.id)
+            return (
+              <Card
+                key={a.id}
+                className="card-pad"
+                style={{ display: "flex", flexDirection: "column", gap: 12 }}
+              >
+                <div className="between" style={{ alignItems: "flex-start" }}>
+                  <Link href={`/accounts/${a.id}`} className="center gap10">
+                    <Tile mono={monogram(a.company)} />
+                    <div>
+                      <div className="row-title">{a.company}</div>
+                      <div className="row-sub mono ellip" style={{ maxWidth: "20ch" }}>
+                        {a.provider_email ?? a.email ?? a.domain ?? ""}
+                      </div>
                     </div>
-                  </div>
-                </Link>
-                <AcctMenu
-                  id={a.id}
-                  status={a.status}
-                  disabled={pending === a.id}
-                  onSet={setStatus}
-                />
-              </div>
+                  </Link>
+                  <AcctMenu
+                    id={a.id}
+                    status={a.status}
+                    disabled={pending === a.id}
+                    onSet={setStatus}
+                  />
+                </div>
 
-              <div className="center gap8 wrap">
-                <StatusBadge status={a.status} />
-                {a.confidence != null && (
-                  <span className="num faint" style={{ fontSize: 11 }}>
-                    {Math.round(a.confidence * 100)}% match
-                  </span>
-                )}
-              </div>
-
-              {a.source && (
-                <div
-                  className="center gap6 wrap"
-                  style={{ borderTop: "1px solid var(--border)", paddingTop: 11 }}
-                >
-                  <span className="chip" style={{ height: 22, fontSize: 11 }}>
-                    <Icon name="shield" size={11} />
-                    {a.source}
-                  </span>
-                  {a.domain && (
+                <div className="center gap8 wrap">
+                  <StatusBadge status={a.status} />
+                  {a.confidence != null && (
+                    <span className="num faint" style={{ fontSize: 11 }}>
+                      {Math.round(a.confidence * 100)}% match
+                    </span>
+                  )}
+                  {siblings && siblings.length > 0 && (
                     <span className="chip" style={{ height: 22, fontSize: 11 }}>
-                      <Icon name="globe" size={11} />
-                      {a.domain}
+                      Also on {siblings[0].providerEmail ?? siblings[0].email}
+                      {siblings.length > 1 ? ` +${siblings.length - 1}` : ""}
                     </span>
                   )}
                 </div>
-              )}
 
-              <div className="between mono faint" style={{ fontSize: 11 }}>
-                <span>
-                  First {a.first_seen ? new Date(a.first_seen).toLocaleDateString() : "—"}
-                </span>
-                <span>Last {a.last_seen ? new Date(a.last_seen).toLocaleDateString() : "—"}</span>
-              </div>
+                {a.source && (
+                  <div
+                    className="center gap6 wrap"
+                    style={{ borderTop: "1px solid var(--border)", paddingTop: 11 }}
+                  >
+                    <span className="chip" style={{ height: 22, fontSize: 11 }}>
+                      <Icon name="shield" size={11} />
+                      {a.source}
+                    </span>
+                    {a.domain && (
+                      <span className="chip" style={{ height: 22, fontSize: 11 }}>
+                        <Icon name="globe" size={11} />
+                        {a.domain}
+                      </span>
+                    )}
+                  </div>
+                )}
 
-              {a.status === "unknown" && (
-                <div className="btn-row" style={{ gap: 7 }}>
-                  <button
-                    className="btn sm"
-                    style={{ flex: 1 }}
-                    disabled={pending === a.id}
-                    onClick={() => setStatus(a.id, "active")}
-                  >
-                    <Icon name="check" size={14} />
-                    Confirm
-                  </button>
-                  <button
-                    className="btn sm ghost"
-                    disabled={pending === a.id}
-                    onClick={() => setStatus(a.id, "ignore")}
-                  >
-                    <Icon name="x" size={14} />
-                    Ignore
-                  </button>
+                <div className="between mono faint" style={{ fontSize: 11 }}>
+                  <span>
+                    First {a.first_seen ? new Date(a.first_seen).toLocaleDateString() : "—"}
+                  </span>
+                  <span>Last {a.last_seen ? new Date(a.last_seen).toLocaleDateString() : "—"}</span>
                 </div>
-              )}
-            </Card>
-          ))}
+
+                {a.status === "unknown" && (
+                  <div className="btn-row" style={{ gap: 7 }}>
+                    <button
+                      className="btn sm"
+                      style={{ flex: 1 }}
+                      disabled={pending === a.id}
+                      onClick={() => setStatus(a.id, "active")}
+                    >
+                      <Icon name="check" size={14} />
+                      Confirm
+                    </button>
+                    <button
+                      className="btn sm ghost"
+                      disabled={pending === a.id}
+                      onClick={() => setStatus(a.id, "ignore")}
+                    >
+                      <Icon name="x" size={14} />
+                      Ignore
+                    </button>
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       ) : (
         <Card style={{ overflow: "hidden" }}>
@@ -183,7 +319,7 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
               <thead>
                 <tr>
                   <th>Service</th>
-                  <th>Email</th>
+                  <th>Inbox</th>
                   <th>Domain</th>
                   <th>First seen</th>
                   <th>Last seen</th>
@@ -193,7 +329,7 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((a) => (
+                {shownAccounts.map((a) => (
                   <tr key={a.id} onClick={() => router.push(`/accounts/${a.id}`)}>
                     <td>
                       <div className="center gap8">
@@ -202,7 +338,7 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
                       </div>
                     </td>
                     <td className="num muted" style={{ fontSize: 11.5 }}>
-                      {a.email ?? "—"}
+                      {a.provider_email ?? a.email ?? "—"}
                     </td>
                     <td className="muted">{a.domain ?? "—"}</td>
                     <td className="num muted">
@@ -231,14 +367,29 @@ export function AccountsBrowser({ accounts }: { accounts: LocalAccount[] }) {
         </Card>
       )}
 
-      {filtered.length > visible && (
+      {(grouped ? filteredGroups.length : filteredAccounts.length) > visible && (
         <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
           <button className="btn sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
-            Show more ({filtered.length - visible} remaining)
+            Show more (
+            {(grouped ? filteredGroups.length : filteredAccounts.length) - visible} remaining)
           </button>
         </div>
       )}
     </div>
+  )
+}
+
+function Empty() {
+  return (
+    <Card>
+      <div className="empty">
+        <span className="ico">
+          <Icon name="filter" size={20} />
+        </span>
+        <h4>Nothing here</h4>
+        <p>No accounts match this filter.</p>
+      </div>
+    </Card>
   )
 }
 

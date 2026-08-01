@@ -16,6 +16,8 @@ import { contentFingerprint, isNoiseCandidate } from "@/lib/ai/near-dup"
 import { invalidateEmbeddingCache } from "@/lib/ai/vector-cache"
 import { getAiSettings, getGoogleAccount, getLocalUserId } from "@/lib/db/local"
 import { getValidGoogleAccessToken } from "@/lib/google/oauth"
+import { bridgeExtractToSubscription } from "@/lib/ai/bill-bridge"
+import type { EmailIntent } from "@/lib/ai/intent"
 import {
   countEmailsNeedingIntelligence,
   deleteEmbeddingsNotMatchingModel,
@@ -39,7 +41,8 @@ import {
 
 const GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 const MAX_BODY_FETCH = 8
-const MAX_LLM_EXTRACT = 3
+const MAX_LLM_EXTRACT = 8
+const MONEY_INTENTS: EmailIntent[] = ["receipt", "renewal", "trial"]
 const MAX_PER_RUN = 300
 const FULL_REBUILD_EVERY = 200
 
@@ -288,7 +291,12 @@ export async function runEmailIntelligence(input: {
 
     let extract = null
     if (isHighSignal(intentResult.intent, intentResult.uncertain)) {
-      const useLlm = allowLlm && llmExtracts < MAX_LLM_EXTRACT
+      const isMoney = MONEY_INTENTS.includes(intentResult.intent)
+      // Prioritize money intents for the LLM extract budget.
+      const useLlm =
+        allowLlm &&
+        llmExtracts < MAX_LLM_EXTRACT &&
+        (isMoney || intentResult.uncertain || llmExtracts < 3)
       extract = await extractFields({
         from: email.from_address,
         subject: email.subject,
@@ -311,6 +319,18 @@ export async function runEmailIntelligence(input: {
       reasons: intentResult.reasons,
       contentFp: fp,
     })
+
+    if (extract) {
+      bridgeExtractToSubscription({
+        providerId: input.providerId,
+        emailId: email.id,
+        fromAddress: email.from_address,
+        toAddress: email.to_address,
+        seenAt: email.date,
+        intent: intentResult.intent,
+        extract,
+      })
+    }
 
     upsertEmailFts({
       emailId: email.id,

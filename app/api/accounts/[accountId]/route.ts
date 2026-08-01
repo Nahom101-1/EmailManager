@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { getAccountById, updateAccountStatus } from "@/lib/db/local"
 import { recordLearningLabel } from "@/lib/ai/learning"
+import { findAccountSiblings } from "@/lib/identity/groups"
 
 const schema = z.object({
   status: z.enum(["active", "closed", "unknown", "ignore"]),
@@ -30,11 +31,16 @@ export async function PATCH(
   updateAccountStatus({ id: accountId, status: parsed.data.status })
 
   if (before && (parsed.data.status === "active" || parsed.data.status === "ignore")) {
+    const siblings = findAccountSiblings(accountId)
     recordLearningLabel({
       kind: parsed.data.status === "active" ? "confirm" : "ignore",
       entity: "account",
       company: before.company,
       domain: before.domain,
+      siblingDomains: siblings.map((s) => s.domain).filter((d): d is string => Boolean(d)),
+      siblingCompanies: siblings.length
+        ? [before.company]
+        : [],
     })
   }
 

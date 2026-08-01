@@ -115,7 +115,10 @@ export default async function DashboardPage() {
                 <Tile mono={monogram(bill.vendor ?? "?")} size="sm" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink)" }}>{bill.vendor ?? "Unknown"}</div>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{daysLabel}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                    {daysLabel}
+                    {bill.provider_email ? ` · ${bill.provider_email}` : ""}
+                  </div>
                 </div>
                 {bill.amount != null && (
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>

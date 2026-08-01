@@ -12,6 +12,7 @@ export interface EmailForIntelligence {
   id: string
   provider_id: string
   from_address: string | null
+  to_address: string | null
   subject: string | null
   snippet: string | null
   body_text: string | null
@@ -48,7 +49,7 @@ export function listEmailsNeedingIntelligence(
     return getDb()
       .prepare(
         `
-      select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
+      select e.id, e.provider_id, e.from_address, e.to_address, e.subject, e.snippet, e.body_text,
              e.date, e.labels, e.headers, e.gmail_message_id
       from emails e
       left join email_embeddings emb on emb.email_id = e.id
@@ -65,7 +66,7 @@ export function listEmailsNeedingIntelligence(
   return getDb()
     .prepare(
       `
-      select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
+      select e.id, e.provider_id, e.from_address, e.to_address, e.subject, e.snippet, e.body_text,
              e.date, e.labels, e.headers, e.gmail_message_id
       from emails e
       left join email_embeddings emb on emb.email_id = e.id
@@ -151,7 +152,7 @@ export function listEmailsNeedingEmbed(
     return getDb()
       .prepare(
         `
-        select e.id, e.provider_id, e.from_address, e.subject, e.snippet, e.body_text,
+        select e.id, e.provider_id, e.from_address, e.to_address, e.subject, e.snippet, e.body_text,
                e.date, e.labels, e.headers, e.gmail_message_id
         from emails e
         left join email_embeddings emb on emb.email_id = e.id
@@ -169,7 +170,7 @@ export function listEmailsByIds(ids: string[]): EmailForIntelligence[] {
   return getDb()
     .prepare(
       `
-      select id, provider_id, from_address, subject, snippet, body_text,
+      select id, provider_id, from_address, to_address, subject, snippet, body_text,
              date, labels, headers, gmail_message_id
       from emails
       where id in (${placeholders})
@@ -1013,6 +1014,7 @@ export interface UpcomingBill {
   billing_cycle: string | null
   due_date: string
   intent: string
+  provider_email: string | null
 }
 
 export function getUpcomingBills(days = 30): UpcomingBill[] {
@@ -1020,11 +1022,14 @@ export function getUpcomingBills(days = 30): UpcomingBill[] {
   const today = new Date().toISOString().slice(0, 10)
   return getDb()
     .prepare(
-      `SELECT email_id as emailId, vendor, amount, currency, billing_cycle, due_date, intent
-       FROM email_intelligence
-       WHERE intent IN ('renewal','receipt') AND due_date IS NOT NULL
-         AND due_date >= ? AND due_date <= ?
-       ORDER BY due_date ASC
+      `SELECT i.email_id as emailId, i.vendor, i.amount, i.currency, i.billing_cycle,
+              i.due_date, i.intent, p.email as provider_email
+       FROM email_intelligence i
+       LEFT JOIN emails e ON e.id = i.email_id
+       LEFT JOIN providers p ON p.id = e.provider_id
+       WHERE i.intent IN ('renewal','receipt') AND i.due_date IS NOT NULL
+         AND i.due_date >= ? AND i.due_date <= ?
+       ORDER BY i.due_date ASC
        LIMIT 8`
     )
     .all(today, cutoff) as UpcomingBill[]

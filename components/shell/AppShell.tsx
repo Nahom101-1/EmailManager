@@ -9,7 +9,9 @@ import { TopbarSearch } from "@/components/shell/TopbarSearch"
 
 const TABS = [
   { href: "/dashboard", label: "Today" },
+  { href: "/emails", label: "Emails" },
   { href: "/subscriptions", label: "Money" },
+  { href: "/accounts", label: "Accounts" },
   { href: "/assistant", label: "Ask" },
 ]
 
@@ -39,7 +41,7 @@ export function AppShell({
           {TABS.map((tab) => {
             const active =
               pathname === tab.href ||
-              (tab.href === "/subscriptions" && pathname.startsWith("/subscriptions"))
+              (tab.href !== "/dashboard" && pathname.startsWith(tab.href))
             return (
               <Link key={tab.href} href={tab.href} className={"tab-link" + (active ? " on" : "")}>
                 {tab.label}

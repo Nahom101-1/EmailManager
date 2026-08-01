@@ -6,6 +6,7 @@ import {
   updateSubscriptionStatus,
 } from "@/lib/db/local"
 import { recordLearningLabel } from "@/lib/ai/learning"
+import { findSubscriptionSiblings } from "@/lib/identity/groups"
 
 const schema = z
   .object({
@@ -50,11 +51,16 @@ export async function PATCH(
   if (parsed.data.status) {
     updateSubscriptionStatus({ id: subscriptionId, status: parsed.data.status })
     if (before && (parsed.data.status === "active" || parsed.data.status === "ignored")) {
+      const siblings = findSubscriptionSiblings(subscriptionId)
       recordLearningLabel({
         kind: parsed.data.status === "active" ? "confirm" : "ignore",
         entity: "subscription",
         company: before.company,
         domain: before.sender_domain,
+        siblingDomains: siblings
+          .map(() => before.sender_domain)
+          .filter((d): d is string => Boolean(d)),
+        siblingCompanies: siblings.length ? [before.company] : [],
       })
     }
   }

@@ -147,6 +147,8 @@ const KNOWN_VENDORS: Record<string, { name: string; category: SubscriptionCatego
   chegg: { name: "Chegg", category: "education" },
   skillshare: { name: "Skillshare", category: "education" },
   linkedin: { name: "LinkedIn", category: "saas" },
+  imax: { name: "IMAX", category: "streaming" },
+  xfinityimax: { name: "IMAX", category: "streaming" },
 }
 
 const CATEGORY_HINTS: Array<{ words: string[]; category: SubscriptionCategory }> = [
@@ -166,25 +168,36 @@ export function parseAmount(text: string): {
   amount: number | null
   billingCycle: "monthly" | "yearly" | null
 } {
+  const money = String.raw`(?:\$|USD\s*|€|EUR\s*|£|GBP\s*)`
+  const num = String.raw`(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)`
   const patterns: Array<[RegExp, "monthly" | "yearly" | null]> = [
-    [/\$\s*(\d+(?:\.\d{1,2})?)\s*\/\s*(?:mo(?:nth)?|monthly)/i, "monthly"],
-    [/\$\s*(\d+(?:\.\d{1,2})?)\s+per\s+(?:mo(?:nth)?)/i, "monthly"],
-    [/\$\s*(\d+(?:\.\d{1,2})?)\s*\/\s*(?:yr|year|annual(?:ly)?)/i, "yearly"],
-    [/\$\s*(\d+(?:\.\d{1,2})?)\s+per\s+(?:yr|year)/i, "yearly"],
-    [/charged\s+\$\s*(\d+(?:\.\d{1,2})?)\s+(monthly|annually|yearly)/i, null],
-    [/\$\s*(\d+(?:\.\d{1,2})?)\s+(monthly|annually|yearly)/i, null],
-    [/subscription[^$]{0,40}\$\s*(\d+(?:\.\d{1,2})?)/i, "monthly"],
-    [/total[^$]{0,20}\$\s*(\d+(?:\.\d{1,2})?)/i, "monthly"],
+    [new RegExp(`${money}\\s*${num}\\s*\\/\\s*(?:mo(?:nth)?|monthly)`, "i"), "monthly"],
+    [new RegExp(`${money}\\s*${num}\\s+per\\s+(?:mo(?:nth)?)`, "i"), "monthly"],
+    [new RegExp(`${money}\\s*${num}\\s*\\/\\s*(?:yr|year|annual(?:ly)?)`, "i"), "yearly"],
+    [new RegExp(`${money}\\s*${num}\\s+per\\s+(?:yr|year)`, "i"), "yearly"],
+    [new RegExp(`(?:was\\s+)?charged\\s+${money}\\s*${num}\\s+(monthly|annually|yearly)?`, "i"), null],
+    [new RegExp(`(?:total\\s+due|amount\\s+due|balance\\s+due)[^$€£0-9]{0,24}${money}\\s*${num}`, "i"), "monthly"],
+    [new RegExp(`(?:renews?\\s+on|renewal)[^$€£0-9]{0,40}${money}\\s*${num}`, "i"), "monthly"],
+    [new RegExp(`${money}\\s*${num}\\s+(monthly|annually|yearly)`, "i"), null],
+    [new RegExp(`subscription[^$€£]{0,40}${money}\\s*${num}`, "i"), "monthly"],
+    [new RegExp(`total[^$€£]{0,20}${money}\\s*${num}`, "i"), "monthly"],
+    [new RegExp(`${num}\\s*(?:USD|EUR|GBP)\\s*(?:\\/\\s*(mo(?:nth)?|yr|year))?`, "i"), null],
   ]
 
   for (const [pattern, defaultCycle] of patterns) {
     const m = text.match(pattern)
     if (!m) continue
-    const amount = parseFloat(m[1])
+    const raw = (m[1] ?? "").replace(/,/g, "")
+    const amount = parseFloat(raw)
     if (isNaN(amount) || amount <= 0 || amount > 10000) continue
     let billingCycle: "monthly" | "yearly" | null = defaultCycle
-    if (m[2]) {
-      billingCycle = /year|annual|yr/.test(m[2].toLowerCase()) ? "yearly" : "monthly"
+    const cycleHint = (m[2] ?? "").toLowerCase()
+    if (cycleHint) {
+      billingCycle = /year|annual|yr/.test(cycleHint) ? "yearly" : "monthly"
+    } else if (/year|annual|\/\s*yr/i.test(m[0])) {
+      billingCycle = "yearly"
+    } else if (/month|\/\s*mo/i.test(m[0])) {
+      billingCycle = "monthly"
     }
     return { amount, billingCycle }
   }

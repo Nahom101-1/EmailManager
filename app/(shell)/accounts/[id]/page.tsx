@@ -5,6 +5,7 @@ import { Card, Icon, StatusBadge, Tile, monogram } from "@/components/ui"
 import { AccountActions } from "@/components/accounts/AccountActions"
 import { AccountNotes } from "@/components/accounts/AccountNotes"
 import { getAccountById, getAccountNote, getLocalUserId, listSubscriptions } from "@/lib/db/local"
+import { findAccountSiblings } from "@/lib/identity/groups"
 
 function fmtDate(value: string | null): string {
   if (!value) return "—"
@@ -27,6 +28,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
   const related = listSubscriptions(userId).filter(
     (s) => firstWord.length > 1 && s.company.toLowerCase().includes(firstWord)
   )
+  const siblings = findAccountSiblings(id, userId)
 
   const evidence: Array<{ time: string; title: string; desc: string; warn?: boolean }> = []
   if (account.source_subject || account.source_snippet) {
@@ -140,6 +142,23 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
               <span className="k">Source inbox</span>
               <span className="v">{account.provider_email ?? "—"}</span>
             </div>
+            {siblings.length > 0 && (
+              <div className="kv" style={{ alignItems: "flex-start" }}>
+                <span className="k">Also found on</span>
+                <span className="v" style={{ display: "grid", gap: 4 }}>
+                  {siblings.map((s) => (
+                    <Link
+                      key={s.id}
+                      href={`/accounts/${s.id}`}
+                      className="mono"
+                      style={{ fontSize: 11.5 }}
+                    >
+                      {s.providerEmail ?? s.email ?? "other inbox"}
+                    </Link>
+                  ))}
+                </span>
+              </div>
+            )}
             <div className="kv">
               <span className="k">First seen</span>
               <span className="v mono">{fmtDate(account.first_seen)}</span>

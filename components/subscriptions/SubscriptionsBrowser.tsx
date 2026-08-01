@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation"
 import { Card, Conf, Icon, StatusBadge, Tile, fmt, monogram } from "@/components/ui"
 import { useTheme } from "@/components/theme/ThemeProvider"
 import type { LocalSubscription, SubscriptionStatus } from "@/lib/db/local"
+import type { CompanyGroup, SubscriptionGroupInstance } from "@/lib/identity/groups"
 
-type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
+type SubRow = LocalSubscription
 
 const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
   { v: "all", label: "All" },
@@ -18,10 +19,26 @@ const FILTERS: Array<{ v: "all" | SubscriptionStatus; label: string }> = [
 
 const PAGE_SIZE = 100
 
-export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[] }) {
+function inboxLabel(s: SubRow): string {
+  return s.provider_email ?? s.email_used ?? "—"
+}
+
+export function SubscriptionsBrowser({
+  subscriptions,
+  groups,
+  inboxes,
+  initialInbox = "all",
+}: {
+  subscriptions: SubRow[]
+  groups: CompanyGroup<SubscriptionGroupInstance>[]
+  inboxes: string[]
+  initialInbox?: string
+}) {
   const router = useRouter()
   const { layout, set } = useTheme()
   const [filter, setFilter] = useState<"all" | SubscriptionStatus>("all")
+  const [inbox, setInbox] = useState(initialInbox)
+  const [grouped, setGrouped] = useState(inboxes.length >= 2)
   const [pending, setPending] = useState<string | null>(null)
   const [visible, setVisible] = useState(PAGE_SIZE)
 
@@ -31,8 +48,29 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
     return m
   }, [subscriptions])
 
-  const filtered = subscriptions.filter((s) => filter === "all" || s.status === filter)
+  const filtered = useMemo(() => {
+    return subscriptions.filter((s) => {
+      if (filter !== "all" && s.status !== filter) return false
+      if (inbox !== "all") {
+        const addr = (s.provider_email ?? s.email_used ?? "").toLowerCase()
+        if (addr !== inbox.toLowerCase()) return false
+      }
+      return true
+    })
+  }, [subscriptions, filter, inbox])
+
+  const filteredGroups = useMemo(() => {
+    return groups.filter((g) => {
+      if (filter !== "all" && g.status !== filter) return false
+      if (inbox !== "all") {
+        if (!g.inboxes.some((e) => e.toLowerCase() === inbox.toLowerCase())) return false
+      }
+      return true
+    })
+  }, [groups, filter, inbox])
+
   const shown = filtered.slice(0, visible)
+  const shownGroups = filteredGroups.slice(0, visible)
 
   async function patch(id: string, payload: Record<string, string>) {
     setPending(id)
@@ -50,8 +88,8 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
 
   return (
     <div>
-      <div className="between mb14" style={{ alignItems: "flex-start" }}>
-        <div className="btn-row" style={{ gap: 7 }}>
+      <div className="between mb14" style={{ alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div className="btn-row" style={{ gap: 7, flexWrap: "wrap" }}>
           {FILTERS.map((f) => {
             const count = f.v === "all" ? subscriptions.length : (counts.get(f.v) ?? 0)
             return (
@@ -71,134 +109,259 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
             )
           })}
         </div>
-        <div className="seg">
-          {(["cards", "table"] as const).map((v) => (
-            <button
-              key={v}
-              className={layout === v ? "on" : ""}
-              onClick={() => {
-                setVisible(PAGE_SIZE)
-                set("layout", v)
-              }}
-            >
-              {v === "cards" ? "Cards" : "Table"}
-            </button>
-          ))}
+        <div className="btn-row" style={{ gap: 8 }}>
+          {inboxes.length > 1 && (
+            <div className="seg">
+              <button className={!grouped ? "on" : ""} onClick={() => setGrouped(false)}>
+                Flat
+              </button>
+              <button className={grouped ? "on" : ""} onClick={() => setGrouped(true)}>
+                Grouped
+              </button>
+            </div>
+          )}
+          <div className="seg">
+            {(["cards", "table"] as const).map((v) => (
+              <button
+                key={v}
+                className={layout === v ? "on" : ""}
+                onClick={() => {
+                  setVisible(PAGE_SIZE)
+                  set("layout", v)
+                }}
+              >
+                {v === "cards" ? "Cards" : "Table"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <Card>
-          <div className="empty">
-            <span className="ico">
-              <Icon name="filter" size={20} />
-            </span>
-            <h4>Nothing here</h4>
-            <p>No subscriptions match this filter.</p>
+      {inboxes.length > 0 && (
+        <div className="btn-row mb14" style={{ gap: 7, flexWrap: "wrap" }}>
+          <button
+            className={"chip btn-chip" + (inbox === "all" ? " on" : "")}
+            onClick={() => {
+              setInbox("all")
+              setVisible(PAGE_SIZE)
+            }}
+          >
+            All inboxes
+          </button>
+          {inboxes.map((email) => (
+            <button
+              key={email}
+              className={"chip btn-chip" + (inbox === email ? " on" : "")}
+              onClick={() => {
+                setInbox(email)
+                setVisible(PAGE_SIZE)
+              }}
+            >
+              <Icon name="mail" size={11} />
+              {email}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {grouped ? (
+        filteredGroups.length === 0 ? (
+          <Empty />
+        ) : (
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))" }}
+          >
+            {shownGroups.map((g) => {
+              const amountInst = g.instances.find((i) => i.amount != null)
+              return (
+                <Card
+                  key={g.key}
+                  className="card-pad"
+                  style={{ display: "flex", flexDirection: "column", gap: 13 }}
+                >
+                  <div className="between" style={{ alignItems: "flex-start" }}>
+                    <div className="center gap10">
+                      <Tile mono={monogram(g.company)} />
+                      <div>
+                        <div className="row-title">{g.company}</div>
+                        <div className="row-sub mono">
+                          {g.instances[0]?.category ?? "recurring"}
+                        </div>
+                      </div>
+                    </div>
+                    <StatusBadge status={g.status} />
+                  </div>
+
+                  <div>
+                    {amountInst?.amount != null ? (
+                      <>
+                        <span
+                          className="num"
+                          style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.03em" }}
+                        >
+                          ${fmt(amountInst.amount)}
+                        </span>
+                        <span className="faint mono" style={{ fontSize: 12 }}>
+                          {" "}
+                          /{amountInst.billingCycle === "yearly" ? "yr" : "mo"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="faint mono" style={{ fontSize: 12 }}>
+                        amount not detected
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="center gap6 wrap">
+                    {g.multiInbox && (
+                      <span className="chip" style={{ height: 22, fontSize: 11 }}>
+                        <Icon name="layers" size={11} />
+                        {g.inboxes.length} inboxes
+                      </span>
+                    )}
+                    {g.instances.map((inst) => (
+                      <span key={inst.id} className="chip" style={{ height: 22, fontSize: 11 }}>
+                        <Icon name="mail" size={11} />
+                        {inst.providerEmail ?? inst.emailUsed ?? "inbox"}
+                        {inst.dueDate ? ` · due ${inst.dueDate}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                </Card>
+              )
+            })}
           </div>
-        </Card>
+        )
+      ) : filtered.length === 0 ? (
+        <Empty />
       ) : layout === "cards" ? (
         <div
           className="grid"
           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(310px, 1fr))" }}
         >
-          {shown.map((s) => (
-            <Card
-              key={s.id}
-              className="card-pad"
-              style={{ display: "flex", flexDirection: "column", gap: 13 }}
-            >
-              <div className="between" style={{ alignItems: "flex-start" }}>
-                <div className="center gap10">
-                  <Tile mono={monogram(s.company)} />
-                  <div>
-                    <div className="row-title">{s.company}</div>
-                    <div className="row-sub mono">{s.category ?? "recurring"}</div>
-                  </div>
-                </div>
-                <SubMenu id={s.id} disabled={pending === s.id} onPatch={patch} />
-              </div>
-
-              <div className="between" style={{ alignItems: "flex-end" }}>
-                <div>
-                  {s.amount != null ? (
-                    <>
-                      <span
-                        className="num"
-                        style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.03em" }}
-                      >
-                        ${fmt(s.amount)}
-                      </span>
-                      <span className="faint mono" style={{ fontSize: 12 }}>
-                        {" "}
-                        /{s.billing_cycle === "yearly" ? "yr" : "mo"}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="faint mono" style={{ fontSize: 12 }}>
-                      amount not detected
-                    </span>
-                  )}
-                </div>
-                <StatusBadge status={s.status} />
-              </div>
-
-              <div
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  paddingTop: 11,
-                  display: "grid",
-                  gap: 7,
-                }}
+          {shown.map((s) => {
+            const siblings = groups
+              .find((g) => g.instances.some((i) => i.id === s.id))
+              ?.instances.filter((i) => i.id !== s.id)
+            return (
+              <Card
+                key={s.id}
+                className="card-pad"
+                style={{ display: "flex", flexDirection: "column", gap: 13 }}
               >
-                <div className="kv" style={{ padding: 0, border: 0 }}>
-                  <span className="k">Email used</span>
-                  <span className="v mono" style={{ fontSize: 11.5 }}>
-                    {s.email_used ?? s.sender_email ?? "—"}
-                  </span>
+                <div className="between" style={{ alignItems: "flex-start" }}>
+                  <div className="center gap10">
+                    <Tile mono={monogram(s.company)} />
+                    <div>
+                      <div className="row-title">{s.company}</div>
+                      <div className="row-sub mono">{s.category ?? "recurring"}</div>
+                    </div>
+                  </div>
+                  <SubMenu id={s.id} disabled={pending === s.id} onPatch={patch} />
                 </div>
-                <div className="kv" style={{ padding: 0, border: 0 }}>
-                  <span className="k">Last seen</span>
-                  <span className="v mono" style={{ fontSize: 11.5 }}>
-                    {s.last_seen ? new Date(s.last_seen).toLocaleDateString() : "—"}
-                  </span>
-                </div>
-                <div className="kv" style={{ padding: 0, border: 0 }}>
-                  <span className="k">Source · confidence</span>
-                  <span className="v center gap8">
-                    {s.source && (
-                      <span className="chip" style={{ height: 18, fontSize: 10.5 }}>
-                        {s.source}
+
+                <div className="between" style={{ alignItems: "flex-end" }}>
+                  <div>
+                    {s.amount != null ? (
+                      <>
+                        <span
+                          className="num"
+                          style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-.03em" }}
+                        >
+                          ${fmt(s.amount)}
+                        </span>
+                        <span className="faint mono" style={{ fontSize: 12 }}>
+                          {" "}
+                          /{s.billing_cycle === "yearly" ? "yr" : "mo"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="faint mono" style={{ fontSize: 12 }}>
+                        amount not detected
                       </span>
                     )}
-                    {s.confidence != null && <Conf value={s.confidence} />}
-                  </span>
+                  </div>
+                  <StatusBadge status={s.status} />
                 </div>
-              </div>
 
-              {s.status !== "active" && (
-                <div className="btn-row" style={{ gap: 7 }}>
-                  <button
-                    className="btn sm"
-                    style={{ flex: 1 }}
-                    disabled={pending === s.id}
-                    onClick={() => patch(s.id, { status: "active" })}
-                  >
-                    <Icon name="check" size={14} />
-                    Confirm active
-                  </button>
-                  <button
-                    className="btn sm ghost"
-                    disabled={pending === s.id}
-                    onClick={() => patch(s.id, { status: "ignored" })}
-                  >
-                    <Icon name="x" size={14} />
-                    Ignore
-                  </button>
+                <div
+                  style={{
+                    borderTop: "1px solid var(--border)",
+                    paddingTop: 11,
+                    display: "grid",
+                    gap: 7,
+                  }}
+                >
+                  <div className="kv" style={{ padding: 0, border: 0 }}>
+                    <span className="k">Inbox</span>
+                    <span className="v mono" style={{ fontSize: 11.5 }}>
+                      {inboxLabel(s)}
+                    </span>
+                  </div>
+                  {s.due_date && (
+                    <div className="kv" style={{ padding: 0, border: 0 }}>
+                      <span className="k">Due</span>
+                      <span className="v mono" style={{ fontSize: 11.5 }}>
+                        {s.due_date}
+                      </span>
+                    </div>
+                  )}
+                  <div className="kv" style={{ padding: 0, border: 0 }}>
+                    <span className="k">Last seen</span>
+                    <span className="v mono" style={{ fontSize: 11.5 }}>
+                      {s.last_seen ? new Date(s.last_seen).toLocaleDateString() : "—"}
+                    </span>
+                  </div>
+                  <div className="kv" style={{ padding: 0, border: 0 }}>
+                    <span className="k">Source · confidence</span>
+                    <span className="v center gap8">
+                      {s.source && (
+                        <span className="chip" style={{ height: 18, fontSize: 10.5 }}>
+                          {s.source}
+                        </span>
+                      )}
+                      {s.confidence != null && <Conf value={s.confidence} />}
+                    </span>
+                  </div>
+                  {siblings && siblings.length > 0 && (
+                    <div className="kv" style={{ padding: 0, border: 0 }}>
+                      <span className="k">Also on</span>
+                      <span className="v mono" style={{ fontSize: 11.5 }}>
+                        {siblings
+                          .map((i) => i.providerEmail ?? i.emailUsed)
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </Card>
-          ))}
+
+                {s.status !== "active" && (
+                  <div className="btn-row" style={{ gap: 7 }}>
+                    <button
+                      className="btn sm"
+                      style={{ flex: 1 }}
+                      disabled={pending === s.id}
+                      onClick={() => patch(s.id, { status: "active" })}
+                    >
+                      <Icon name="check" size={14} />
+                      Confirm active
+                    </button>
+                    <button
+                      className="btn sm ghost"
+                      disabled={pending === s.id}
+                      onClick={() => patch(s.id, { status: "ignored" })}
+                    >
+                      <Icon name="x" size={14} />
+                      Ignore
+                    </button>
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       ) : (
         <Card style={{ overflow: "hidden" }}>
@@ -208,7 +371,8 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
                 <tr>
                   <th>Company</th>
                   <th>Amount</th>
-                  <th>Email</th>
+                  <th>Inbox</th>
+                  <th>Due</th>
                   <th>Last seen</th>
                   <th>Source</th>
                   <th>Confidence</th>
@@ -229,8 +393,9 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
                       {s.amount != null ? `$${fmt(s.amount)}` : "—"}
                     </td>
                     <td className="num muted" style={{ fontSize: 11.5 }}>
-                      {s.email_used ?? s.sender_email ?? "—"}
+                      {inboxLabel(s)}
                     </td>
+                    <td className="num muted">{s.due_date ?? "—"}</td>
                     <td className="num muted">
                       {s.last_seen ? new Date(s.last_seen).toLocaleDateString() : "—"}
                     </td>
@@ -252,14 +417,29 @@ export function SubscriptionsBrowser({ subscriptions }: { subscriptions: SubRow[
         </Card>
       )}
 
-      {filtered.length > visible && (
+      {(grouped ? filteredGroups.length : filtered.length) > visible && (
         <div className="btn-row mt14" style={{ justifyContent: "center" }}>
           <button className="btn sm" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
-            Show more ({filtered.length - visible} remaining)
+            Show more (
+            {(grouped ? filteredGroups.length : filtered.length) - visible} remaining)
           </button>
         </div>
       )}
     </div>
+  )
+}
+
+function Empty() {
+  return (
+    <Card>
+      <div className="empty">
+        <span className="ico">
+          <Icon name="filter" size={20} />
+        </span>
+        <h4>Nothing here</h4>
+        <p>No subscriptions match this filter.</p>
+      </div>
+    </Card>
   )
 }
 

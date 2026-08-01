@@ -2,6 +2,7 @@ import {
   countEmailsSince,
   getLocalUserId,
   listAccounts,
+  listProviderTags,
   listProviders,
   listRecentEmails,
   listSubscriptions,
@@ -11,6 +12,7 @@ import {
   type LocalSubscription,
 } from "@/lib/db/local"
 import { buildDigestContext } from "@/lib/ai/tools"
+import { listAccountGroups, listSubscriptionGroups } from "@/lib/identity/groups"
 
 export interface BriefItem {
   t: string
@@ -56,22 +58,29 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
 
   if (on("inboxes")) {
     const providers = listProviders(userId)
+    const tags = listProviderTags(providers.map((p) => p.id))
     if (providers.length === 0) {
       lines.push("Connected inboxes: none yet.")
     } else {
       lines.push(
         `Connected inboxes (${providers.length}): ` +
           providers
-            .map(
-              (p) =>
-                `${p.email} (${p.type}, ${p.status}` +
+            .map((p) => {
+              const tag = tags[p.id]
+              const purpose = tag ? `, purpose=${tag.purpose}` : ""
+              return (
+                `${p.email} (${p.type}, ${p.status}${purpose}` +
                 (p.last_sync_at
                   ? `, last sync ${new Date(p.last_sync_at).toLocaleDateString()}`
                   : "") +
                 ")"
-            )
+              )
+            })
             .join("; ") +
           "."
+      )
+      lines.push(
+        "When answering which email has a service, use the inbox purpose tags and the multi-inbox groups below."
       )
     }
   }
@@ -103,8 +112,19 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
           review
             .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
             .slice(0, 8)
-            .map((s) => s.company)
+            .map((s) => `${s.company} (${s.provider_email ?? s.email_used ?? "inbox"})`)
             .join(", ") +
+          "."
+      )
+    }
+    const subGroups = listSubscriptionGroups(userId)
+    const multiSubs = subGroups.filter((g) => g.multiInbox).slice(0, 8)
+    if (multiSubs.length > 0) {
+      lines.push(
+        "Subscriptions on multiple inboxes: " +
+          multiSubs
+            .map((g) => `${g.company} → ${g.inboxes.join(" + ")}`)
+            .join("; ") +
           "."
       )
     }
@@ -122,10 +142,28 @@ export function buildLifeContext(settings: AiSettings, userId = getLocalUserId()
         "Accounts needing review: " +
           review
             .slice(0, 8)
-            .map((a) => a.company)
+            .map((a) => `${a.company} (${a.provider_email ?? a.email ?? "inbox"})`)
             .join(", ") +
           "."
       )
+    }
+    const acctGroups = listAccountGroups(userId)
+    const multi = acctGroups.filter((g) => g.multiInbox).slice(0, 10)
+    if (multi.length > 0) {
+      lines.push(
+        "Services on multiple inboxes: " +
+          multi
+            .map((g) => `${g.company} → ${g.inboxes.join(" + ")}`)
+            .join("; ") +
+          "."
+      )
+    }
+    const byInbox = acctGroups
+      .filter((g) => !g.multiInbox)
+      .slice(0, 12)
+      .map((g) => `${g.company} on ${g.inboxes[0] ?? "?"}`)
+    if (byInbox.length > 0) {
+      lines.push("Sample account→inbox map: " + byInbox.join("; ") + ".")
     }
   }
 

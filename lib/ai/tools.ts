@@ -2,7 +2,15 @@
  * Tool implementations the assistant can call for retrieval / digest / explain.
  */
 
-import { getEmailById, listSubscriptions, getLocalUserId, getAiSettings } from "@/lib/db/local"
+import {
+  getEmailById,
+  listSubscriptions,
+  getLocalUserId,
+  getAiSettings,
+  listProviderTags,
+  listProviders,
+} from "@/lib/db/local"
+import { listAccountGroups, listSubscriptionGroups } from "@/lib/identity/groups"
 import {
   getCluster,
   getDailyDigestRows,
@@ -92,6 +100,26 @@ export const ASSISTANT_TOOLS = [
         email_id: { type: "string" },
       },
       required: ["email_id"],
+    },
+  },
+  {
+    name: "lookup_service_inbox",
+    description:
+      "Find which connected inbox(es) a company/service appears on (accounts + subscriptions). Use for questions like 'which email has IMAX?' or 'what's only on work?'.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        company: {
+          type: "string",
+          description: "Company or service name to look up (optional if purpose filter set)",
+        },
+        purpose: {
+          type: "string",
+          enum: ["personal", "work", "shopping", "other"],
+          description: "Filter to services on inboxes tagged with this purpose",
+        },
+      },
+      required: [] as string[],
     },
   },
 ]
@@ -332,6 +360,58 @@ export async function runAssistantTool(
         uncertain: result.uncertain,
         reasons: result.reasons,
         extract,
+      })
+    }
+    case "lookup_service_inbox": {
+      if (!settings.scopes.accounts && !settings.scopes.subscriptions && !settings.scopes.inboxes) {
+        return JSON.stringify({ error: "accounts, subscriptions, or inboxes scope required" })
+      }
+      const companyQ = rawInput.company ? String(rawInput.company).toLowerCase() : ""
+      const purpose = rawInput.purpose ? String(rawInput.purpose) : null
+      const providers = listProviders(getLocalUserId())
+      const tags = listProviderTags(providers.map((p) => p.id))
+      const purposeEmails = new Set(
+        purpose
+          ? providers
+              .filter((p) => tags[p.id]?.purpose === purpose)
+              .map((p) => p.email.toLowerCase())
+          : []
+      )
+
+      const acctGroups = listAccountGroups(getLocalUserId())
+      const subGroups = listSubscriptionGroups(getLocalUserId())
+
+      const matchGroup = <T extends { company: string; inboxes: string[]; multiInbox: boolean; key: string }>(
+        groups: T[]
+      ) =>
+        groups.filter((g) => {
+          if (companyQ && !g.company.toLowerCase().includes(companyQ) && !g.key.includes(companyQ.replace(/[^a-z0-9]/g, ""))) {
+            return false
+          }
+          if (purpose && !g.inboxes.some((e) => purposeEmails.has(e.toLowerCase()))) return false
+          return Boolean(companyQ || purpose)
+        })
+
+      const accounts = matchGroup(acctGroups).slice(0, 12).map((g) => ({
+        company: g.company,
+        inboxes: g.inboxes,
+        multiInbox: g.multiInbox,
+        kind: "account" as const,
+      }))
+      const subscriptions = matchGroup(subGroups).slice(0, 12).map((g) => ({
+        company: g.company,
+        inboxes: g.inboxes,
+        multiInbox: g.multiInbox,
+        kind: "subscription" as const,
+      }))
+
+      return JSON.stringify({
+        query: { company: companyQ || null, purpose },
+        inboxTags: providers.map((p) => ({
+          email: p.email,
+          purpose: tags[p.id]?.purpose ?? null,
+        })),
+        matches: [...accounts, ...subscriptions],
       })
     }
     default:

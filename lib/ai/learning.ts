@@ -64,6 +64,9 @@ export function recordLearningLabel(input: {
   entity: "subscription" | "account"
   company: string
   domain?: string | null
+  /** Extra domains/companies to bias (cross-inbox siblings). */
+  siblingDomains?: string[]
+  siblingCompanies?: string[]
 }) {
   const store = getLearningStore()
   const company = input.company.trim()
@@ -80,6 +83,16 @@ export function recordLearningLabel(input: {
 
   bump(store.companyBias, company.toLowerCase(), delta)
   if (domain) bump(store.domainBias, domain, delta)
+
+  // Cross-inbox siblings share domain/company bias so confirm on one inbox helps the other.
+  for (const d of input.siblingDomains ?? []) {
+    const key = d.trim().toLowerCase()
+    if (key && key !== domain) bump(store.domainBias, key, delta)
+  }
+  for (const c of input.siblingCompanies ?? []) {
+    const key = c.trim().toLowerCase()
+    if (key && key !== company.toLowerCase()) bump(store.companyBias, key, delta)
+  }
 
   persist(store)
   // Invalidate prototype cache so next classify picks up new examples.

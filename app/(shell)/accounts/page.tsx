@@ -2,14 +2,24 @@ import Link from "next/link"
 import { connection } from "next/server"
 import { Btn, Card, Icon } from "@/components/ui"
 import { AccountsBrowser } from "@/components/accounts/AccountsBrowser"
-import { getLocalUserId, listAccounts } from "@/lib/db/local"
+import { getLocalUserId, listAccounts, listProviders } from "@/lib/db/local"
+import { listAccountGroups } from "@/lib/identity/groups"
 
-export default async function AccountsPage() {
+export default async function AccountsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ inbox?: string }>
+}) {
   await connection()
-  const accounts = listAccounts(getLocalUserId())
+  const sp = await searchParams
+  const userId = getLocalUserId()
+  const accounts = listAccounts(userId)
+  const groups = listAccountGroups(userId)
+  const inboxes = listProviders(userId).map((p) => p.email)
   const active = accounts.filter((a) => a.status === "active").length
   const review = accounts.filter((a) => a.status === "unknown").length
   const ignored = accounts.filter((a) => a.status === "ignore").length
+  const multi = groups.filter((g) => g.multiInbox).length
 
   if (accounts.length === 0) {
     return (
@@ -54,6 +64,7 @@ export default async function AccountsPage() {
     { l: "Total discovered", v: accounts.length, ic: "accounts" },
     { l: "Active", v: active, ic: "check" },
     { l: "Needs review", v: review, ic: "flag", warn: true },
+    { l: "Multi-inbox", v: multi, ic: "layers" },
     { l: "Ignored", v: ignored, ic: "archive" },
   ]
 
@@ -64,13 +75,19 @@ export default async function AccountsPage() {
           <div className="page-eyebrow">Accounts</div>
           <h1 className="page-title">Accounts</h1>
           <p className="page-sub">
-            Online services tied to your email addresses, discovered from sign-ins, receipts, and
-            alerts.
+            Online services tied to your email addresses. Grouped view merges the same company across
+            inboxes.
           </p>
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 16 }}>
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: `repeat(${Math.min(stats.length, 5)},1fr)`,
+          marginBottom: 16,
+        }}
+      >
         {stats.map((s) => (
           <Card key={s.l} className="stat">
             <span className="label">
@@ -84,7 +101,12 @@ export default async function AccountsPage() {
         ))}
       </div>
 
-      <AccountsBrowser accounts={accounts} />
+      <AccountsBrowser
+        accounts={accounts}
+        groups={groups}
+        inboxes={inboxes}
+        initialInbox={sp.inbox && inboxes.includes(sp.inbox) ? sp.inbox : "all"}
+      />
     </div>
   )
 }

@@ -88,6 +88,10 @@ export interface LocalSubscription {
   source_subject: string | null
   source_from: string | null
   source_snippet: string | null
+  amount: number | null
+  currency: string | null
+  billing_cycle: string | null
+  due_date: string | null
 }
 
 export interface LocalAccount {
@@ -156,6 +160,16 @@ export interface DetectedSubscriptionRecord {
   seenAt: string
   amount?: number | null
   billing_cycle?: string | null
+  due_date?: string | null
+  currency?: string | null
+}
+
+export type ProviderPurpose = "personal" | "work" | "shopping" | "other"
+
+export interface ProviderTag {
+  purpose: ProviderPurpose
+  label?: string
+  source: "user" | "ai"
 }
 
 export interface DetectedAccountRecord {
@@ -702,11 +716,11 @@ export function upsertDetectedSubscriptions(input: {
     insert into subscriptions (
       id, user_id, provider_id, company, sender_email, sender_domain,
       category, confidence, source, status, email_used,
-      first_seen, last_seen, source_email_id, amount, billing_cycle
+      first_seen, last_seen, source_email_id, amount, billing_cycle, due_date, currency
     ) values (
       @id, @userId, @providerId, @company, @senderEmail, @senderDomain,
       @category, @confidence, @source, 'unknown', @emailUsed,
-      @seenAt, @seenAt, @evidenceEmailId, @amount, @billingCycle
+      @seenAt, @seenAt, @evidenceEmailId, @amount, @billingCycle, @dueDate, @currency
     )
     on conflict(user_id, provider_id, company) do update set
       last_seen = max(coalesce(subscriptions.last_seen, excluded.last_seen), excluded.last_seen),
@@ -722,7 +736,9 @@ export function upsertDetectedSubscriptions(input: {
       sender_domain = coalesce(subscriptions.sender_domain, excluded.sender_domain),
       email_used = coalesce(subscriptions.email_used, excluded.email_used),
       amount = coalesce(excluded.amount, subscriptions.amount),
-      billing_cycle = coalesce(excluded.billing_cycle, subscriptions.billing_cycle)
+      billing_cycle = coalesce(excluded.billing_cycle, subscriptions.billing_cycle),
+      due_date = coalesce(excluded.due_date, subscriptions.due_date),
+      currency = coalesce(excluded.currency, subscriptions.currency)
   `)
 
   const seen = new Set<string>()
@@ -743,6 +759,8 @@ export function upsertDetectedSubscriptions(input: {
         evidenceEmailId: record.evidenceEmailId,
         amount: record.amount ?? null,
         billingCycle: record.billing_cycle ?? null,
+        dueDate: record.due_date ?? null,
+        currency: record.currency ?? null,
       })
       seen.add(record.company)
     }
@@ -1005,6 +1023,41 @@ export function setAccountNote(accountId: string, note: string) {
   setSetting(`account_note:${accountId}`, note)
 }
 
+export function getProviderTag(providerId: string): ProviderTag | null {
+  const raw = getSetting(`provider_tag:${providerId}`)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as ProviderTag
+    if (!parsed?.purpose || !parsed?.source) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function setProviderTag(providerId: string, tag: ProviderTag) {
+  setSetting(`provider_tag:${providerId}`, JSON.stringify(tag))
+}
+
+export function listProviderTags(
+  providerIds: string[]
+): Record<string, ProviderTag> {
+  const out: Record<string, ProviderTag> = {}
+  for (const id of providerIds) {
+    const tag = getProviderTag(id)
+    if (tag) out[id] = tag
+  }
+  return out
+}
+
+export function getCompanyDisplayName(groupKey: string): string | null {
+  return getSetting(`company_display:${groupKey}`)
+}
+
+export function setCompanyDisplayName(groupKey: string, displayName: string) {
+  setSetting(`company_display:${groupKey}`, displayName)
+}
+
 /* ------------------------------------------------------------------ */
 /* Dashboard + reset                                                  */
 /* ------------------------------------------------------------------ */
@@ -1211,6 +1264,7 @@ function migrate(database: Database.Database) {
       amount real,
       currency text,
       billing_cycle text,
+      due_date text,
       status text not null default 'unknown' check (status in ('active', 'cancelled', 'unknown', 'ignored')),
       email_used text,
       first_seen text,
@@ -1323,6 +1377,8 @@ function migrate(database: Database.Database) {
   migrateAccountsTable(database)
   migrateEmailIntelligence(database)
   migrateOverviewTables(database)
+
+  ensureColumns(database, "subscriptions", [["due_date", "text"]])
 
   database.exec(`
     create unique index if not exists subscriptions_unique_company

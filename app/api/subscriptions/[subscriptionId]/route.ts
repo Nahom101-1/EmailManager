@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
-import { updateSubscriptionCategory, updateSubscriptionStatus } from "@/lib/db/local"
+import {
+  getSubscriptionById,
+  updateSubscriptionCategory,
+  updateSubscriptionStatus,
+} from "@/lib/db/local"
+import { recordLearningLabel } from "@/lib/ai/learning"
 
 const schema = z
   .object({
@@ -31,8 +36,18 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
+  const before = getSubscriptionById(subscriptionId)
+
   if (parsed.data.status) {
     updateSubscriptionStatus({ id: subscriptionId, status: parsed.data.status })
+    if (before && (parsed.data.status === "active" || parsed.data.status === "ignored")) {
+      recordLearningLabel({
+        kind: parsed.data.status === "active" ? "confirm" : "ignore",
+        entity: "subscription",
+        company: before.company,
+        domain: before.sender_domain,
+      })
+    }
   }
   if (parsed.data.category) {
     updateSubscriptionCategory({ id: subscriptionId, category: parsed.data.category })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
-import { updateAccountStatus } from "@/lib/db/local"
+import { getAccountById, updateAccountStatus } from "@/lib/db/local"
+import { recordLearningLabel } from "@/lib/ai/learning"
 
 const schema = z.object({
   status: z.enum(["active", "closed", "unknown", "ignore"]),
@@ -24,6 +25,18 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
+  const before = getAccountById(accountId)
+
   updateAccountStatus({ id: accountId, status: parsed.data.status })
+
+  if (before && (parsed.data.status === "active" || parsed.data.status === "ignore")) {
+    recordLearningLabel({
+      kind: parsed.data.status === "active" ? "confirm" : "ignore",
+      entity: "account",
+      company: before.company,
+      domain: before.domain,
+    })
+  }
+
   return NextResponse.json({ ok: true })
 }

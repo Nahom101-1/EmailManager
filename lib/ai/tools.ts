@@ -2,7 +2,7 @@
  * Tool implementations the assistant can call for retrieval / digest / explain.
  */
 
-import { getEmailById, listSubscriptions, getLocalUserId } from "@/lib/db/local"
+import { getEmailById, listSubscriptions, getLocalUserId, getAiSettings } from "@/lib/db/local"
 import {
   getCluster,
   getDailyDigestRows,
@@ -100,8 +100,15 @@ export async function runAssistantTool(
   name: string,
   rawInput: Record<string, unknown>
 ): Promise<string> {
+  const settings = getAiSettings()
+  const allowContent = Boolean(settings.scopes.content)
+  const allowMetadata = Boolean(settings.scopes.metadata)
+
   switch (name) {
     case "search_emails": {
+      if (!allowMetadata && !allowContent) {
+        return JSON.stringify({ error: "metadata or content scope required for email search" })
+      }
       const query = String(rawInput.query ?? "")
       const limit = Number(rawInput.limit ?? 8)
       const hits = await hybridSearchEmails(query, Math.min(20, limit || 8))
@@ -114,7 +121,8 @@ export async function runAssistantTool(
           score: Number(h.score.toFixed(3)),
           source: h.source,
           intent: h.intent ?? null,
-          snippet: h.snippet?.slice(0, 160) ?? null,
+          // Snippets are message content — only when content scope is on.
+          snippet: allowContent ? h.snippet?.slice(0, 160) ?? null : null,
         })),
         null,
         0
@@ -278,7 +286,7 @@ export async function runAssistantTool(
                 from: evidence.from_address,
                 subject: evidence.subject,
                 date: evidence.date,
-                snippet: evidence.snippet,
+                snippet: allowContent ? evidence.snippet : null,
                 intent: intel?.intent ?? null,
                 vendor: intel?.vendor ?? null,
               }

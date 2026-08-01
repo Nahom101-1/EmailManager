@@ -12,8 +12,15 @@ import {
   type LocalSubscription,
 } from "@/lib/db/local"
 import { buildBriefing } from "@/lib/ai/context"
-import { getOverviewStats, listClusters, listOverviewDaily } from "@/lib/db/intelligence"
-import { getUpcomingBills, getEndingTrials } from "@/lib/db/intelligence"
+import {
+  getEndingTrials,
+  getOverviewStats,
+  getPriceChanges,
+  getSecuritySpike,
+  getUpcomingBills,
+  listClusters,
+  listOverviewDaily,
+} from "@/lib/db/intelligence"
 
 type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
 
@@ -51,6 +58,8 @@ export default async function DashboardPage() {
   const historyTarget = providers.reduce((t, p) => t + (p.history_target ?? 2000), 0)
   const upcomingBills = getUpcomingBills(30)
   const endingTrials = getEndingTrials(14)
+  const priceChanges = getPriceChanges(4)
+  const securitySpike = getSecuritySpike(7)
 
   const syncTargets = providers.filter((p) => p.status !== "error").map((p) => ({ id: p.id, email: p.email }))
 
@@ -211,6 +220,56 @@ export default async function DashboardPage() {
                 </div>
               ))}
             </div>
+
+            {(priceChanges.length > 0 || endingTrials.length > 0 || securitySpike.isSpike || securitySpike.recentCount > 0) && (
+              <div>
+                <div className="section-label" style={{ margin: "0 0 8px" }}>Signals</div>
+                <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                  <div className="card" style={{ padding: 12, background: "var(--surface-inset)" }}>
+                    <div className="label">Price changes</div>
+                    {priceChanges.length === 0 ? (
+                      <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>None detected</div>
+                    ) : (
+                      <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12.5, lineHeight: 1.45 }}>
+                        {priceChanges.map((p) => (
+                          <li key={`${p.vendor}-${p.emailId}`}>
+                            {p.vendor}: ${p.previousAmount.toFixed(2)} → ${p.newAmount.toFixed(2)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="card" style={{ padding: 12, background: "var(--surface-inset)" }}>
+                    <div className="label">Trials ending</div>
+                    {endingTrials.length === 0 ? (
+                      <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>None in 14 days</div>
+                    ) : (
+                      <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12.5, lineHeight: 1.45 }}>
+                        {endingTrials.slice(0, 4).map((t) => (
+                          <li key={t.emailId}>
+                            {t.vendor ?? "Unknown"} · {t.due_date}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="card" style={{ padding: 12, background: "var(--surface-inset)" }}>
+                    <div className="label">Security</div>
+                    <div style={{ fontWeight: 650, fontSize: 18, marginTop: 4 }}>
+                      {securitySpike.recentCount}
+                      <span className="faint" style={{ fontWeight: 500, fontSize: 12, marginLeft: 6 }}>
+                        / {securitySpike.windowDays}d
+                      </span>
+                    </div>
+                    <div className="delta" style={{ marginTop: 2 }}>
+                      {securitySpike.isSpike
+                        ? `Spike vs prior ${securitySpike.windowDays}d (${securitySpike.priorCount})`
+                        : `Prior window: ${securitySpike.priorCount}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {overview && Object.keys(overview.intent_counts).length > 0 && (
               <div>

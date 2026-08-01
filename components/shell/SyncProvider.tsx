@@ -27,6 +27,7 @@ interface SyncResult {
   historySynced: number
   historyTarget: number
   historyComplete: boolean
+  rounds: number
 }
 
 interface SyncContextValue {
@@ -42,6 +43,9 @@ const STEPS = [
   { k: "store", label: "Storing metadata" },
   { k: "detect", label: "Detecting subscriptions" },
 ]
+
+const MAX_AUTO_ROUNDS = 12
+const BACKOFF_MS = 600
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -103,6 +107,9 @@ function SyncModal({
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [errored, setErrored] = useState(false)
+  const [cancelled, setCancelled] = useState(false)
+  const [progressLabel, setProgressLabel] = useState("Starting…")
+  const cancelRef = useRef(false)
   const [result, setResult] = useState<SyncResult>({
     listed: 0,
     stored: 0,
@@ -113,12 +120,16 @@ function SyncModal({
     historySynced: 0,
     historyTarget: 2000,
     historyComplete: true,
+    rounds: 0,
   })
+
+  const cancel = useCallback(() => {
+    cancelRef.current = true
+    setCancelled(true)
+  }, [])
 
   useEffect(() => {
     let alive = true
-    // Animate the steps on a timer for the signature feel while the real
-    // sync runs in parallel; settle on the real result when it returns.
     const timers: ReturnType<typeof setTimeout>[] = []
     ;[700, 1500, 2300].forEach((ms, i) => {
       timers.push(setTimeout(() => alive && setStep(i + 1), ms))
@@ -135,39 +146,87 @@ function SyncModal({
         historySynced: 0,
         historyTarget: 2000,
         historyComplete: true,
+        rounds: 0,
       }
       let anyError = false
+      let allHistoryComplete = true
+
+      // Per-target auto-continue while history incomplete or intel backlog remains.
       for (const target of targets) {
-        try {
-          const res = await fetch(`/api/providers/${target.id}/sync`, { method: "POST" })
-          const data = await res.json()
-          if (!res.ok) {
+        if (cancelRef.current || !alive) break
+
+        let needMore = true
+        let rounds = 0
+        let targetHistoryComplete = false
+        let backlog = 0
+
+        while (needMore && rounds < MAX_AUTO_ROUNDS) {
+          if (cancelRef.current || !alive) break
+          rounds += 1
+          agg.rounds += 1
+          if (alive) {
+            setProgressLabel(
+              rounds === 1
+                ? `Syncing ${target.email}…`
+                : `Continuing ${target.email} (round ${rounds})…`
+            )
+          }
+
+          try {
+            const res = await fetch(`/api/providers/${target.id}/sync`, { method: "POST" })
+            const data = await res.json()
+            if (!res.ok) {
+              anyError = true
+              needMore = false
+              allHistoryComplete = false
+              continue
+            }
+            agg.listed += data.listed ?? 0
+            agg.stored += data.stored ?? 0
+            agg.subscriptionsDetected += data.subscriptionsDetected ?? 0
+            agg.accountsDetected += data.accountsDetected ?? 0
+            agg.embedded += data.intelligence?.embedded ?? 0
+            backlog = data.intelligence?.backlogRemaining ?? 0
+            agg.backlogRemaining = backlog
+            targetHistoryComplete = Boolean(data.history?.complete)
+            if (data.history) {
+              agg.historySynced = Math.max(agg.historySynced, data.history.synced ?? 0)
+              agg.historyTarget = data.history.target ?? agg.historyTarget
+            }
+            needMore = !targetHistoryComplete || backlog > 0
+            if (alive) {
+              setResult({
+                ...agg,
+                historyComplete: targetHistoryComplete && backlog === 0,
+              })
+            }
+            if (needMore && !cancelRef.current) {
+              await delay(BACKOFF_MS)
+            }
+          } catch {
             anyError = true
-            continue
+            needMore = false
+            allHistoryComplete = false
           }
-          agg.listed += data.listed ?? 0
-          agg.stored += data.stored ?? 0
-          agg.subscriptionsDetected += data.subscriptionsDetected ?? 0
-          agg.accountsDetected += data.accountsDetected ?? 0
-          agg.embedded += data.intelligence?.embedded ?? 0
-          agg.backlogRemaining += data.intelligence?.backlogRemaining ?? 0
-          if (data.history) {
-            agg.historySynced = Math.max(agg.historySynced, data.history.synced ?? 0)
-            agg.historyTarget = data.history.target ?? agg.historyTarget
-            agg.historyComplete = agg.historyComplete && Boolean(data.history.complete)
-          }
-        } catch {
-          anyError = true
         }
+
+        if (!targetHistoryComplete || backlog > 0) allHistoryComplete = false
       }
+
+      agg.historyComplete = !cancelRef.current && allHistoryComplete && agg.backlogRemaining === 0
+      if (cancelRef.current) agg.historyComplete = false
+
       if (!alive) return
       timers.forEach(clearTimeout)
       setResult(agg)
       setErrored(anyError)
       setStep(STEPS.length)
       setDone(true)
-      if (anyError) onToast("Some inboxes failed to sync", "err")
-      else {
+      if (cancelRef.current) {
+        onToast("Sync paused", "ok", "Resume anytime — progress is saved")
+      } else if (anyError) {
+        onToast("Some inboxes failed to sync", "err")
+      } else {
         const hist = agg.historyComplete
           ? `${agg.stored} stored`
           : `${agg.historySynced.toLocaleString()} / ${agg.historyTarget.toLocaleString()} history`
@@ -191,15 +250,27 @@ function SyncModal({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span className="mono-tile sm" style={{ color: "var(--accent)" }}>
-            <Icon name={done ? (errored ? "alert" : "check") : "sync"} size={15} />
+            <Icon name={done ? (errored ? "alert" : cancelled ? "pause" : "check") : "sync"} size={15} />
           </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 650, fontSize: 13.5 }}>{done ? (errored ? "Sync finished with errors" : "Sync complete") : "Syncing inbox"}</div>
-            <div className="row-sub mono">{label}</div>
+            <div style={{ fontWeight: 650, fontSize: 13.5 }}>
+              {done
+                ? errored
+                  ? "Sync finished with errors"
+                  : cancelled
+                    ? "Sync paused"
+                    : "Sync complete"
+                : "Syncing inbox"}
+            </div>
+            <div className="row-sub mono">{done ? label : progressLabel}</div>
           </div>
-          {done && (
+          {done ? (
             <button className="btn ghost icon sm" onClick={onClose}>
               <Icon name="x" size={16} />
+            </button>
+          ) : (
+            <button className="btn ghost sm" onClick={cancel} type="button">
+              Cancel
             </button>
           )}
         </div>
@@ -215,6 +286,19 @@ function SyncModal({
                   {s.label}
                 </div>
               ))}
+              {result.rounds > 1 && (
+                <div className="notice" style={{ marginTop: 12, padding: "8px 10px" }}>
+                  <div className="body" style={{ fontSize: 12 }}>
+                    Auto-continuing · round {result.rounds}
+                    {!result.historyComplete
+                      ? ` · ${result.historySynced.toLocaleString()} / ${result.historyTarget.toLocaleString()} emails`
+                      : ""}
+                    {result.backlogRemaining > 0
+                      ? ` · ${result.backlogRemaining.toLocaleString()} to index`
+                      : ""}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -236,10 +320,11 @@ function SyncModal({
               <div className="notice" style={{ marginTop: 12, padding: "10px 12px" }}>
                 <div className="body" style={{ fontSize: 12.5 }}>
                   History: {result.historySynced.toLocaleString()} / {result.historyTarget.toLocaleString()}
-                  {result.historyComplete ? " · complete" : " · continue sync to load more"}
+                  {result.historyComplete ? " · complete" : " · more remains — sync again to continue"}
                   {result.backlogRemaining > 0
                     ? ` · intelligence backlog ${result.backlogRemaining.toLocaleString()}`
                     : ""}
+                  {result.rounds > 1 ? ` · ${result.rounds} rounds` : ""}
                 </div>
               </div>
             </>
@@ -251,14 +336,31 @@ function SyncModal({
             <span className="faint mono center" style={{ fontSize: 11, marginRight: "auto" }}>
               <Icon name="clock" size={12} />&nbsp;Last synced just now
             </span>
-            <Link href="/subscriptions" onClick={onClose}>
-              <Btn size="sm" variant="ghost">View subscriptions</Btn>
-            </Link>
+            {!result.historyComplete || result.backlogRemaining > 0 ? (
+              <Btn
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  onClose()
+                  // Parent refresh; user can hit Sync again — auto-loop will resume.
+                }}
+              >
+                Done
+              </Btn>
+            ) : (
+              <Link href="/subscriptions" onClick={onClose}>
+                <Btn size="sm" variant="ghost">View subscriptions</Btn>
+              </Link>
+            )}
           </div>
         )}
       </div>
     </div>
   )
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function useSync() {

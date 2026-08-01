@@ -1,11 +1,14 @@
 import {
+  countProviderEmails,
   createSyncRun,
   finishSyncRun,
   getEmailIdMap,
   getGoogleAccount,
   getProvider,
   hasRunningSyncRun,
+  reclaimStaleSyncRuns,
   updateProviderHistoryCursor,
+  updateProviderPageToken,
   updateProviderSyncStatus,
   upsertDetectedAccounts,
   upsertDetectedSubscriptions,
@@ -19,6 +22,8 @@ import { getValidGoogleAccessToken } from "@/lib/google/oauth"
 import { runEmailIntelligence } from "@/lib/ai/pipeline"
 
 const GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+const GMAIL_HISTORY_URL = "https://gmail.googleapis.com/gmail/v1/users/me/history"
+const GMAIL_PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 const METADATA_HEADERS = [
   "From",
   "To",
@@ -33,7 +38,7 @@ const METADATA_HEADERS = [
 
 const PAGE_SIZE = 100
 const DEFAULT_HISTORY_TARGET = 2000
-/** Messages fetched per Sync click (continues from cursor). */
+/** Messages fetched per Sync click during initial crawl. */
 const MESSAGES_PER_SYNC = 400
 const FETCH_CONCURRENCY = 2
 const FETCH_DELAY_MS = 80
@@ -42,9 +47,7 @@ const MAX_RETRIES = 4
 export async function syncGmailProvider(input: {
   providerId: string
   origin: string
-  /** Override history target (default 2000). */
   historyTarget?: number
-  /** Messages to pull this run (default 400). */
   messagesPerSync?: number
 }) {
   const provider = getProvider(input.providerId)
@@ -57,6 +60,7 @@ export async function syncGmailProvider(input: {
     throw new Error("Google token record was not found. Reconnect the account.")
   }
 
+  reclaimStaleSyncRuns()
   if (hasRunningSyncRun(input.providerId)) {
     throw new Error("A sync is already running for this account")
   }
@@ -69,27 +73,67 @@ export async function syncGmailProvider(input: {
   try {
     const accessToken = await getValidGoogleAccessToken({ account, origin: input.origin })
 
-    // Resume history crawl when incomplete; otherwise pull newest pages (incremental).
-    const resumeToken =
-      !provider.history_complete && provider.history_page_token
-        ? provider.history_page_token
-        : undefined
+    let messageIds: string[] = []
+    let nextPageToken: string | null = null
+    let historyComplete = provider.history_complete
+    let gmailHistoryId = provider.gmail_history_id
+    let mode: "crawl" | "delta" | "recent" = "crawl"
 
-    const listed = await listGmailMessagesPaged({
-      accessToken,
-      pageSize: PAGE_SIZE,
-      maxMessages: messagesPerSync,
-      pageToken: resumeToken,
-    })
+    if (provider.history_complete && provider.gmail_history_id) {
+      mode = "delta"
+      const delta = await listGmailHistoryMessageIds({
+        accessToken,
+        startHistoryId: provider.gmail_history_id,
+        maxMessages: messagesPerSync,
+      })
+      if (delta.stale) {
+        // History ID too old — fall back to recent window after last watermark.
+        mode = "recent"
+        const listed = await listGmailMessagesPaged({
+          accessToken,
+          pageSize: PAGE_SIZE,
+          maxMessages: Math.min(100, messagesPerSync),
+          pageToken: undefined,
+          query: recentQuery(provider.newest_internal_date),
+        })
+        messageIds = listed.messages.map((m) => m.id)
+        nextPageToken = null
+      } else {
+        messageIds = delta.messageIds
+        gmailHistoryId = delta.historyId ?? gmailHistoryId
+      }
+    } else if (provider.history_complete) {
+      mode = "recent"
+      const listed = await listGmailMessagesPaged({
+        accessToken,
+        pageSize: PAGE_SIZE,
+        maxMessages: Math.min(100, messagesPerSync),
+        pageToken: undefined,
+        query: recentQuery(provider.newest_internal_date),
+      })
+      messageIds = listed.messages.map((m) => m.id)
+    } else {
+      mode = "crawl"
+      const resumeToken = provider.history_page_token ?? undefined
+      const listed = await listGmailMessagesPaged({
+        accessToken,
+        pageSize: PAGE_SIZE,
+        maxMessages: messagesPerSync,
+        pageToken: resumeToken,
+      })
+      messageIds = listed.messages.map((m) => m.id)
+      nextPageToken = listed.nextPageToken
+      // Crash-safe: persist page token before the heavy metadata fetch.
+      updateProviderPageToken(input.providerId, nextPageToken)
+    }
 
     const messages = await fetchMetadataBatch({
       accessToken,
       providerId: input.providerId,
-      messageIds: listed.messages.map((m) => m.id),
+      messageIds,
     })
 
-    const stored = upsertGmailMessages(messages)
-
+    const upsert = upsertGmailMessages(messages)
     const emailIdMap = getEmailIdMap(
       input.providerId,
       messages.map((message) => message.gmailMessageId)
@@ -138,32 +182,45 @@ export async function syncGmailProvider(input: {
     const subscriptionsDetected = upsertDetectedSubscriptions({ records: subscriptionRecords })
     const accountsDetected = upsertDetectedAccounts({ records: accountRecords })
 
-    // Update history cursor. When history is complete, keep complete=true and
-    // clear page token so later syncs pull fresh first pages (incremental).
-    let historySyncedCount = provider.history_synced_count
-    let historyComplete = provider.history_complete
-    let nextToken: string | null = listed.nextPageToken
+    // Unique stored emails for this provider — not fetch attempts.
+    const uniqueStored = countProviderEmails(input.providerId)
+    let historySyncedCount = uniqueStored
+    let persistToken: string | null = null
 
-    if (!historyComplete) {
-      historySyncedCount = Math.min(historyTarget, historySyncedCount + listed.messages.length)
-      const hitTarget = historySyncedCount >= historyTarget
-      const exhausted = !listed.nextPageToken
+    if (mode === "crawl") {
+      const hitTarget = uniqueStored >= historyTarget
+      const exhausted = !nextPageToken
       historyComplete = hitTarget || exhausted
-      if (historyComplete) nextToken = null
+      persistToken = historyComplete ? null : nextPageToken
+      if (historyComplete) {
+        // Seed History API watermark for true incremental syncs.
+        gmailHistoryId = (await fetchGmailProfileHistoryId(accessToken)) ?? gmailHistoryId
+      }
     } else {
-      // Incremental mode: pull newest pages; keep crawl counters stable.
-      nextToken = null
+      historyComplete = true
+      persistToken = null
+      if (!gmailHistoryId || mode === "recent") {
+        gmailHistoryId = (await fetchGmailProfileHistoryId(accessToken)) ?? gmailHistoryId
+      }
     }
+
+    const newestInternalDate = messages.reduce<string | null>((best, m) => {
+      if (!m.date) return best
+      if (!best || m.date > best) return m.date
+      return best
+    }, provider.newest_internal_date)
 
     updateProviderHistoryCursor({
       providerId: input.providerId,
-      historyPageToken: nextToken,
+      historyPageToken: persistToken,
       historySyncedCount,
       historyComplete,
       historyTarget,
+      gmailHistoryId,
+      newestInternalDate,
     })
 
-    let intelligence = { embedded: 0, classified: 0, clusters: 0 }
+    let intelligence = { embedded: 0, classified: 0, clusters: 0, backlogRemaining: 0 }
     try {
       intelligence = await runEmailIntelligence({
         providerId: input.providerId,
@@ -183,15 +240,16 @@ export async function syncGmailProvider(input: {
     finishSyncRun({
       id: syncRunId,
       status: "success",
-      emailsSeen: listed.messages.length,
-      emailsStored: stored,
+      emailsSeen: messageIds.length,
+      emailsStored: upsert.inserted,
       subscriptionsDetected,
       accountsDetected,
     })
 
     return {
-      listed: listed.messages.length,
-      stored,
+      listed: messageIds.length,
+      stored: upsert.inserted,
+      updated: upsert.updated,
       subscriptionsDetected,
       accountsDetected,
       intelligence,
@@ -199,7 +257,8 @@ export async function syncGmailProvider(input: {
         synced: historySyncedCount,
         target: historyTarget,
         complete: historyComplete,
-        pageTokenPresent: Boolean(nextToken),
+        pageTokenPresent: Boolean(persistToken),
+        mode,
       },
     }
   } catch (error) {
@@ -217,7 +276,6 @@ export async function syncGmailProvider(input: {
 interface GmailListResponse {
   messages?: Array<{ id: string; threadId: string }>
   nextPageToken?: string
-  resultSizeEstimate?: number
 }
 
 interface GmailMessageResponse {
@@ -231,11 +289,78 @@ interface GmailMessageResponse {
   }
 }
 
+function recentQuery(newestInternalDate: string | null): string {
+  if (!newestInternalDate) return "newer_than:7d"
+  const d = new Date(newestInternalDate)
+  if (Number.isNaN(d.getTime())) return "newer_than:7d"
+  // Gmail `after:` is exclusive day granularity — subtract one day for safety.
+  d.setUTCDate(d.getUTCDate() - 1)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(d.getUTCDate()).padStart(2, "0")
+  return `after:${y}/${m}/${day}`
+}
+
+async function fetchGmailProfileHistoryId(accessToken: string): Promise<string | null> {
+  const res = await gmailFetch(new URL(GMAIL_PROFILE_URL), accessToken)
+  if (!res.ok) return null
+  const data = (await res.json()) as { historyId?: string }
+  return data.historyId ?? null
+}
+
+async function listGmailHistoryMessageIds(input: {
+  accessToken: string
+  startHistoryId: string
+  maxMessages: number
+}): Promise<{ messageIds: string[]; historyId: string | null; stale: boolean }> {
+  const ids = new Set<string>()
+  let pageToken: string | undefined
+  let latestHistoryId: string | null = null
+
+  while (ids.size < input.maxMessages) {
+    const url = new URL(GMAIL_HISTORY_URL)
+    url.searchParams.set("startHistoryId", input.startHistoryId)
+    url.searchParams.set("historyTypes", "messageAdded")
+    url.searchParams.set("maxResults", "100")
+    if (pageToken) url.searchParams.set("pageToken", pageToken)
+
+    const res = await gmailFetch(url, input.accessToken)
+    if (res.status === 404) {
+      return { messageIds: [], historyId: null, stale: true }
+    }
+    if (!res.ok) {
+      throw new Error(describeGmailError("history", res.status, await res.text()))
+    }
+
+    const data = (await res.json()) as {
+      history?: Array<{
+        messagesAdded?: Array<{ message?: { id?: string } }>
+      }>
+      historyId?: string
+      nextPageToken?: string
+    }
+
+    latestHistoryId = data.historyId ?? latestHistoryId
+    for (const entry of data.history ?? []) {
+      for (const added of entry.messagesAdded ?? []) {
+        if (added.message?.id) ids.add(added.message.id)
+        if (ids.size >= input.maxMessages) break
+      }
+    }
+
+    if (!data.nextPageToken) break
+    pageToken = data.nextPageToken
+  }
+
+  return { messageIds: [...ids], historyId: latestHistoryId, stale: false }
+}
+
 async function listGmailMessagesPaged(input: {
   accessToken: string
   pageSize: number
   maxMessages: number
   pageToken?: string
+  query?: string
 }): Promise<{
   messages: Array<{ id: string; threadId: string }>
   nextPageToken: string | null
@@ -250,7 +375,7 @@ async function listGmailMessagesPaged(input: {
 
     const url = new URL(GMAIL_MESSAGES_URL)
     url.searchParams.set("maxResults", String(pageSize))
-    url.searchParams.set("q", "newer_than:365d")
+    url.searchParams.set("q", input.query ?? "newer_than:365d")
     if (pageToken) url.searchParams.set("pageToken", pageToken)
 
     const res = await gmailFetch(url, input.accessToken)
@@ -275,6 +400,7 @@ async function fetchMetadataBatch(input: {
   providerId: string
   messageIds: string[]
 }): Promise<GmailMessageInput[]> {
+  if (input.messageIds.length === 0) return []
   const results: GmailMessageInput[] = new Array(input.messageIds.length)
   let cursor = 0
 

@@ -4,6 +4,7 @@
  */
 
 import { cosineSimilarity, embedText, hashEmbed } from "@/lib/ai/embeddings"
+import { getLearnedIntentPrototypes } from "@/lib/ai/learning"
 
 export type EmailIntent =
   | "needs_reply"
@@ -127,7 +128,7 @@ export function heuristicIntent(input: {
 
 /** kNN against intent prototypes using an email embedding. */
 export function prototypeIntent(vector: Float32Array): IntentResult {
-  const prototypes = getPrototypeVectors()
+  const prototypes = [...getPrototypeVectors(), ...getLearnedIntentPrototypes()]
   let bestIntent: EmailIntent = "fyi"
   let bestScore = -1
   for (const p of prototypes) {

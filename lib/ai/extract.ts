@@ -104,14 +104,17 @@ export async function extractWithLlm(input: {
   snippet?: string | null
   bodyText?: string | null
   intent?: EmailIntent | null
+  /** When false, never send snippet/body to the cloud — subject/from only. */
+  allowContent?: boolean
 }): Promise<ExtractedFields | null> {
+  const allowContent = input.allowContent !== false
   const prompt =
     `Extract structured fields from this email as JSON only (no markdown):\n` +
     `{"vendor":string|null,"amount":number|null,"currency":"USD"|"EUR"|"GBP"|null,` +
     `"billingCycle":"monthly"|"yearly"|null,"dueDate":"YYYY-MM-DD"|null,"confidence":0-1}\n\n` +
     `From: ${input.from ?? ""}\nSubject: ${input.subject ?? ""}\n` +
-    `Snippet: ${input.snippet ?? ""}\n` +
-    (input.bodyText ? `Body: ${input.bodyText.slice(0, 1500)}\n` : "")
+    (allowContent && input.snippet ? `Snippet: ${input.snippet}\n` : "") +
+    (allowContent && input.bodyText ? `Body: ${input.bodyText.slice(0, 1500)}\n` : "")
 
   try {
     const text = await callClaude(
@@ -150,6 +153,8 @@ export async function extractFields(input: {
   intent: EmailIntent
   uncertain: boolean
   allowLlm: boolean
+  /** Content scope — required to send snippet/body to cloud LLM. */
+  allowContent?: boolean
 }): Promise<ExtractedFields> {
   const rules = extractWithRules(input)
   const needsLlm =
@@ -159,7 +164,13 @@ export async function extractFields(input: {
 
   if (!needsLlm) return { ...rules, intent: input.intent }
 
-  const llm = await extractWithLlm(input)
+  const llm = await extractWithLlm({
+    ...input,
+    allowContent: Boolean(input.allowContent),
+    // Never send bodies/snippets unless content scope is on.
+    snippet: input.allowContent ? input.snippet : null,
+    bodyText: input.allowContent ? input.bodyText : null,
+  })
   if (!llm) return { ...rules, intent: input.intent }
 
   return {

@@ -66,7 +66,8 @@ export async function syncImapProvider(input: { providerId: string }) {
       headers: {},
     }))
 
-    const stored = upsertGmailMessages(messages)
+    const upsert = upsertGmailMessages(messages)
+    const stored = upsert.inserted
 
     const emailIdMap = getEmailIdMap(
       input.providerId,

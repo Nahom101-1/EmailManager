@@ -1,6 +1,8 @@
 // Heuristic, metadata-only detection of subscriptions and online accounts.
 // We never read message bodies — only headers, subject and the Gmail snippet.
 
+import { learningConfidenceBias } from "@/lib/ai/learning"
+
 export type SubscriptionCategory =
   | "saas"
   | "streaming"
@@ -271,13 +273,20 @@ export function detectSubscription(input: DetectionInput): SubscriptionSignal | 
     reasons.push(`Recognized vendor: ${KNOWN_VENDORS[vendorKey].name}`)
   }
 
+  const company = displayNameFromSender(input.from, senderDomain)
+  const learnBias = learningConfidenceBias({ company, domain: senderDomain })
+  if (learnBias !== 0) {
+    confidence += learnBias
+    reasons.push(learnBias > 0 ? "Previously confirmed by you" : "Previously ignored by you")
+  }
+
   if (reasons.length === 0 || confidence < 0.3) return null
 
   const amountText = `${input.subject ?? ""} ${input.snippet ?? ""}`
   const { amount, billingCycle } = parseAmount(amountText)
 
   return {
-    company: displayNameFromSender(input.from, senderDomain),
+    company,
     senderEmail,
     senderDomain,
     category: categoryFor(senderDomain, haystack),
@@ -303,10 +312,17 @@ export function detectAccount(input: DetectionInput): AccountSignal | null {
     }
   }
 
+  const company = displayNameFromSender(input.from, senderDomain)
+  const learnBias = learningConfidenceBias({ company, domain: senderDomain })
+  if (learnBias !== 0) {
+    confidence += learnBias
+    reasons.push(learnBias > 0 ? "Previously confirmed by you" : "Previously ignored by you")
+  }
+
   if (reasons.length === 0 || confidence < 0.35) return null
 
   return {
-    company: displayNameFromSender(input.from, senderDomain),
+    company,
     domain: senderDomain,
     email: input.to ?? null,
     confidence: clampConfidence(confidence),

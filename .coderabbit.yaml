@@ -1,0 +1,26 @@
+language: en-US
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  review_status: false
+  poem: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!package-lock.json"
+    - "!**/*.lock"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        LifeOS: local-first Next.js 16 App Router, TypeScript, Tailwind v4, SQLite.
+        Keep diffs small. Match existing code style and @/ imports.
+        Tests live in tests/. Never weaken privacy gates on scopes.content.
+        Prefer heuristics/embeddings locally; cloud LLM only when opted in.
+
+chat:
+  auto_reply: true

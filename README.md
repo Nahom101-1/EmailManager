@@ -81,6 +81,19 @@ Open the URL printed by Next.js, usually:
 http://localhost:3001
 ```
 
+## CI / local checks
+
+GitHub Actions runs on every PR to `main`: Lint · Format · Test · Audit · Build. Vercel handles preview/production deploys when connected.
+
+```bash
+npm run check          # lint + format + test (fast)
+npm run ci             # full gate including audit + build
+bash scripts/check.sh  # same as ci
+bash .github/setup-repo.sh  # one-time: branch protection, auto-merge, Dependabot security
+```
+
+Useful scripts: `format`, `format:check`, `test`, `test:watch`, `test:coverage`, `typecheck`, `audit`.
+
 ## Environment Variables
 
 ```bash

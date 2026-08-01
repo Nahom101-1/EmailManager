@@ -12,35 +12,80 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
+*.lcov
 
 # next.js
 /.next/
 /out/
 
-# production
+# production / build
 /build
+/dist
+*.tsbuildinfo
+next-env.d.ts
 
-# misc
-.DS_Store
-*.pem
+# local data & databases
 /data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
 
-# debug
+# env & secrets
+.env*
+!.env.example
+*.pem
+*.key
+credentials.json
+client_secret*.json
+service-account*.json
+
+# debug / logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
-# env files (can opt-in for committing if needed)
-.env*
-!.env.example
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
 
-# vercel
+# vercel / deploy
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-AGENTS.md 
+# local AI / agent tooling (not for GitHub)
+.claude/
+.cursor/
+AI_LOG.md
+
+# local planning ADRs (not for GitHub)
+docs/adr/
+
+# design handoff assets (local reference only)
 design_handoff_lifeos/
-.claude/worktrees/
+
+# python / ML scratch (offline training tooling)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.onnx
+*.pt
+*.bin
+models/
+/tmp/

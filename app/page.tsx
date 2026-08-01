@@ -1,63 +1,97 @@
 import Link from "next/link"
-import { ArrowRight, Inbox, Search, ShieldCheck } from "lucide-react"
+import { connection } from "next/server"
+import { Badge, Btn, Icon, Tile, fmt, monogram } from "@/components/ui"
+import { HomeThemeToggle } from "@/components/home/HomeThemeToggle"
+import { getDashboardStats, getLocalUserId, listSubscriptions, type LocalSubscription } from "@/lib/db/local"
 
-export default function Home() {
+type SubRow = LocalSubscription & { amount?: number | null; billing_cycle?: string | null }
+
+export default async function Home() {
+  await connection()
+  const userId = getLocalUserId()
+  const stats = getDashboardStats(userId)
+  const subs = listSubscriptions(userId) as SubRow[]
+  const monthly = subs
+    .filter((s) => s.status === "active" && s.amount != null)
+    .reduce((t, s) => t + (s.billing_cycle === "yearly" ? (s.amount ?? 0) / 12 : s.amount ?? 0), 0)
+
+  const previewStats = [
+    { l: "Inboxes", v: String(stats.providerCount), ic: "mail" },
+    { l: "Subscriptions", v: String(stats.subscriptionCount), ic: "subs" },
+    { l: "Accounts found", v: String(stats.accountCount), ic: "accounts" },
+    { l: "Monthly spend", v: monthly > 0 ? "$" + Math.round(monthly) : "—", ic: "receipt" },
+  ]
+
   return (
-    <main className="min-h-screen overflow-hidden bg-cream px-6 py-8 text-jet">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between">
-        <Link href="/" className="font-display text-2xl font-800 tracking-tight">
-          LifeOS
-        </Link>
-        <div className="flex items-center gap-2">
-          <Link href="/login" className="btn-ghost !px-5 !py-2.5 !text-sm">
-            Sign in
-          </Link>
-          <Link href="/dashboard" className="btn-primary !px-5 !py-2.5 !text-sm">
-            Open app
-          </Link>
+    <div className="home fade-in">
+      <div className="home-bar">
+        <div className="center">
+          <span className="brand-mark"><Icon name="layers" size={17} /></span>
+          <span className="brand-name">Life<b>OS</b></span>
         </div>
-      </nav>
+        <div className="btn-row">
+          <HomeThemeToggle />
+          <Link href="/connect"><Btn variant="ghost" size="sm">Connect inbox</Btn></Link>
+          <Link href="/dashboard"><Btn variant="primary" size="sm" iconR="chevR">Open dashboard</Btn></Link>
+        </div>
+      </div>
 
-      <section className="mx-auto grid min-h-[calc(100vh-96px)] max-w-6xl items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="max-w-3xl opacity-0 animate-fade-up" style={{ animationFillMode: "forwards" }}>
-          <p className="mb-4 text-sm font-medium uppercase tracking-widest text-neutral">
-            Personal operations
-          </p>
-          <h1 className="font-display text-6xl text-jet sm:text-7xl lg:text-8xl" style={{ fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 0.86 }}>
-            Your digital life, organized.
-          </h1>
-          <p className="mt-7 max-w-xl text-lg font-medium leading-8 text-neutral">
-            Connect your inboxes, uncover subscriptions, and map the accounts attached to your email.
-          </p>
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href="/dashboard" className="btn-primary gap-2">
-              Open dashboard
-              <ArrowRight size={17} strokeWidth={2.3} />
-            </Link>
-            <Link href="/connect" className="btn-ghost">
-              Connect inbox
-            </Link>
+      <div className="home-wrap">
+        <div>
+          <Badge outline style={{ marginBottom: 22 }}><Icon name="lock" size={12} />&nbsp;Local-first</Badge>
+          <h1 className="home-promise">Map your digital life<br />from your <span className="hl">inbox</span>.</h1>
+          <p className="home-lede">Connect your email and LifeOS surfaces the subscriptions, accounts, and recurring charges attached to your digital life — quietly, on your own machine.</p>
+          <div className="home-cta">
+            <Link href="/dashboard"><Btn variant="primary" iconR="chevR">Open dashboard</Btn></Link>
+            <Link href="/connect"><Btn icon="connect">Connect inbox</Btn></Link>
+          </div>
+          <div className="home-trust">
+            <Icon name="shield" size={14} /> Your data stays on your machine. Read-only access, no servers.
           </div>
         </div>
 
-        <div className="grid gap-4 opacity-0 animate-fade-up delay-100" style={{ animationFillMode: "forwards" }}>
-          {[
-            { icon: Inbox, label: "Inbox connections", value: "IMAP ready" },
-            { icon: Search, label: "Discovery", value: "Subscriptions and accounts" },
-            { icon: ShieldCheck, label: "Control", value: "Private local workspace" },
-          ].map(({ icon: Icon, label, value }) => (
-            <div key={label} className="glass-strong rounded-3xl p-6 shadow-float">
-              <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-jet text-cream">
-                <Icon size={22} strokeWidth={1.7} />
-              </div>
-              <p className="text-xs font-medium uppercase tracking-widest text-neutral">{label}</p>
-              <p className="mt-2 font-display text-3xl text-jet" style={{ fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 0.95 }}>
-                {value}
-              </p>
+        <div className="preview-card">
+          <div className="card-head" style={{ padding: "12px 16px" }}>
+            <div className="center"><Icon name="dashboard" size={14} className="muted" /><span style={{ fontWeight: 650, fontSize: 13 }}>Dashboard preview</span></div>
+            <Badge tone="active" dot pulse>Live</Badge>
+          </div>
+          <div style={{ padding: 16 }}>
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {previewStats.map((s) => (
+                <div key={s.l} className="card" style={{ padding: 13 }}>
+                  <div className="stat" style={{ padding: 0, gap: 6 }}>
+                    <span className="label"><Icon name={s.ic} size={13} />{s.l}</span>
+                    <span className="val" style={{ fontSize: 21 }}>{s.v}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+            <div className="card mt14" style={{ overflow: "hidden" }}>
+              <div className="list">
+                {subs.slice(0, 3).map((s) => (
+                  <div key={s.id} className="list-row" style={{ padding: "9px 13px" }}>
+                    <Tile mono={monogram(s.company)} size="sm" />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="row-title" style={{ fontSize: 12.5 }}>{s.company}</div>
+                      <div className="row-sub mono">{s.category ?? "recurring"}</div>
+                    </div>
+                    {s.amount != null ? (
+                      <span className="num" style={{ fontSize: 12.5, fontWeight: 600 }}>${fmt(s.amount)}<span className="faint">/mo</span></span>
+                    ) : (
+                      <span className="badge idle" style={{ height: 18 }}>{s.status}</span>
+                    )}
+                  </div>
+                ))}
+                {subs.length === 0 && (
+                  <div className="list-row" style={{ padding: "12px 13px" }}>
+                    <span className="row-sub">Connect an inbox to see detected subscriptions here.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </section>
-    </main>
-  );
+      </div>
+    </div>
+  )
 }

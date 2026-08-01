@@ -1,5 +1,10 @@
-import { encryptPassword } from "@/lib/crypto/credentials"
-import { getLocalUserId, upsertGoogleProvider } from "@/lib/db/local"
+import { decryptPassword, encryptPassword } from "@/lib/crypto/credentials"
+import {
+  getLocalUserId,
+  type GoogleAccount,
+  updateGoogleAccessToken,
+  upsertGoogleProvider,
+} from "@/lib/db/local"
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -67,6 +72,68 @@ export async function exchangeGoogleCode(input: {
     scope: string
     token_type: string
   }
+}
+
+export async function refreshGoogleAccessToken(input: {
+  refreshToken: string
+  clientId: string
+  clientSecret: string
+}) {
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      refresh_token: input.refreshToken,
+      client_id: input.clientId,
+      client_secret: input.clientSecret,
+      grant_type: "refresh_token",
+    }),
+  })
+
+  if (!res.ok) {
+    throw new Error(`Google token refresh failed: ${await res.text()}`)
+  }
+
+  return await res.json() as {
+    access_token: string
+    expires_in?: number
+    scope?: string
+    token_type: string
+  }
+}
+
+export async function getValidGoogleAccessToken(input: {
+  account: GoogleAccount
+  origin: string
+}) {
+  const expiresAt = input.account.expires_at ? new Date(input.account.expires_at).getTime() : 0
+  const refreshWindowMs = 2 * 60 * 1000
+
+  if (expiresAt && expiresAt - Date.now() > refreshWindowMs) {
+    return decryptPassword(input.account.encrypted_access_token)
+  }
+
+  if (!input.account.encrypted_refresh_token) {
+    throw new Error("Google refresh token is missing. Reconnect the account to grant offline access.")
+  }
+
+  const { clientId, clientSecret } = getGoogleOAuthConfig(input.origin)
+  const refreshed = await refreshGoogleAccessToken({
+    refreshToken: decryptPassword(input.account.encrypted_refresh_token),
+    clientId,
+    clientSecret,
+  })
+  const refreshedExpiresAt = refreshed.expires_in
+    ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+    : undefined
+
+  updateGoogleAccessToken({
+    providerId: input.account.provider_id,
+    encryptedAccessToken: encryptPassword(refreshed.access_token),
+    expiresAt: refreshedExpiresAt,
+  })
+
+  return refreshed.access_token
 }
 
 export async function getGmailProfile(accessToken: string) {

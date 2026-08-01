@@ -47,6 +47,7 @@ export default async function AssistantPage() {
       initialScopes={settings.scopes}
       initialCloudEnabled={settings.cloudAiEnabled}
       cloudConfigured={cloudAiConfigured()}
+      ollamaConfigured={Boolean(process.env.OLLAMA_MODEL)}
       suggestedPrompts={SUGGESTED_PROMPTS}
     />
   )

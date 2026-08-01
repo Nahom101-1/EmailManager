@@ -4,6 +4,7 @@ import { getAiSettings } from "@/lib/db/local"
 import { buildBriefing, buildLifeContext } from "@/lib/ai/context"
 import { AI_SYSTEM, fallbackAnswer, streamClaudeWithTools, type ChatMessage } from "@/lib/ai/client"
 import { buildDigestContext } from "@/lib/ai/tools"
+import { ollamaAvailable, streamOllama } from "@/lib/ai/local"
 
 const chatSchema = z.object({
   mode: z.literal("chat"),
@@ -21,6 +22,35 @@ const briefingSchema = z.object({
 
 const schema = z.discriminatedUnion("mode", [chatSchema, briefingSchema])
 
+function sseResponse(stream: ReadableStream<Uint8Array>): Response {
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  })
+}
+
+function streamOllamaSSE(system: string, messages: ChatMessage[]): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder()
+  const sse = (obj: Record<string, string>) => enc.encode(`data: ${JSON.stringify(obj)}\n\n`)
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of streamOllama(system, messages)) {
+          controller.enqueue(sse({ type: "delta", text: chunk }))
+        }
+        controller.enqueue(sse({ type: "done" }))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error"
+        controller.enqueue(sse({ type: "error", text: msg }))
+      }
+      controller.close()
+    },
+  })
+}
+
 export async function POST(request: NextRequest) {
   let body: unknown
   try {
@@ -36,37 +66,41 @@ export async function POST(request: NextRequest) {
 
   const settings = getAiSettings()
 
-  // Cloud AI is opt-in. When it's off we never build/send context — answer
-  // locally from the deterministic briefing instead.
-  const allowCloud = settings.cloudAiEnabled
-  const context = allowCloud ? buildLifeContext(settings) : ""
+  // Priority: Claude (cloud, opt-in) → Ollama (local, always allowed) → deterministic fallback
+  const allowCloud = settings.cloudAiEnabled && Boolean(process.env.ANTHROPIC_API_KEY)
+  const ollamaOk = !allowCloud && (await ollamaAvailable())
+  const useAi = allowCloud || ollamaOk
+  const context = useAi ? buildLifeContext(settings) : ""
+
+  const briefingUserMsg: ChatMessage = {
+    role: "user",
+    content:
+      `CONTEXT (read from the user's inbox):\n${context}\n\n` +
+      "Write a 2-3 sentence morning briefing: what genuinely needs attention today vs what can wait. Direct and factual. No greeting.",
+  }
 
   if (parsed.data.mode === "briefing") {
     const briefing = buildBriefing()
-    if (!allowCloud) {
+    if (!useAi) {
       return NextResponse.json({ live: false, text: localBriefingSummary(briefing) })
     }
-    const stream = streamClaudeWithTools(AI_SYSTEM, [
-      {
-        role: "user",
-        content:
-          `CONTEXT (read from the user's inbox):\n${context}\n\n` +
-          "Use get_daily_digest_inputs if helpful. Write a 2-3 sentence morning briefing: " +
-          "what genuinely needs them today vs what can wait. Direct and factual. No greeting.",
-      },
-    ])
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    })
+    const stream = allowCloud
+      ? streamClaudeWithTools(AI_SYSTEM, [
+          {
+            ...briefingUserMsg,
+            content:
+              `CONTEXT (read from the user's inbox):\n${context}\n\n` +
+              "Use get_daily_digest_inputs if helpful. Write a 2-3 sentence morning briefing: " +
+              "what genuinely needs them today vs what can wait. Direct and factual. No greeting.",
+          },
+        ])
+      : streamOllamaSSE(AI_SYSTEM, [briefingUserMsg])
+    return sseResponse(stream)
   }
 
   // chat
   const { message, history } = parsed.data
-  if (!allowCloud) {
+  if (!useAi) {
     return NextResponse.json({ live: false, text: fallbackAnswer(message, buildBriefing()) })
   }
 
@@ -75,19 +109,15 @@ export async function POST(request: NextRequest) {
     {
       role: "user",
       content:
-        `CONTEXT (read from the user's inbox — only the sources you enabled):\n${context}\n\n` +
+        `CONTEXT (read from the user's inbox):\n${context}\n\n` +
         `User question: ${message}`,
     },
   ]
 
-  const stream = streamClaudeWithTools(AI_SYSTEM, messages)
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  })
+  const stream = allowCloud
+    ? streamClaudeWithTools(AI_SYSTEM, messages)
+    : streamOllamaSSE(AI_SYSTEM, messages)
+  return sseResponse(stream)
 }
 
 function localBriefingSummary(briefing: ReturnType<typeof buildBriefing>): string {

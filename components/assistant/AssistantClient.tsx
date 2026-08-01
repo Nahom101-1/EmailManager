@@ -19,6 +19,7 @@ interface Props {
   initialScopes: Record<AiScopeId, boolean>
   initialCloudEnabled: boolean
   cloudConfigured: boolean
+  ollamaConfigured: boolean
   suggestedPrompts: string[]
 }
 
@@ -31,6 +32,7 @@ export function AssistantClient({
   initialSummary,
   initialCloudEnabled,
   cloudConfigured,
+  ollamaConfigured,
   suggestedPrompts,
 }: Props) {
   const [cloudEnabled, setCloudEnabled] = useState(initialCloudEnabled)
@@ -40,7 +42,9 @@ export function AssistantClient({
   const [busy, setBusy] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  const live = cloudConfigured && cloudEnabled
+  const cloudLive = cloudConfigured && cloudEnabled
+  const localLive = !cloudLive && ollamaConfigured
+  const live = cloudLive || localLive
 
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
@@ -196,7 +200,7 @@ export function AssistantClient({
               style={{ height: 20, fontSize: 11 }}
             >
               <span className="dot" />
-              {live ? "Live" : "Demo"}
+              {cloudLive ? "Cloud" : localLive ? "Local" : "Demo"}
             </span>
             {cloudConfigured && (
               <button
